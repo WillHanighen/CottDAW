@@ -41,7 +41,9 @@ export default function NoteBlock({
   const clearSelection = useUIStore((s) => s.clearSelection);
 
   const updateNote = useProjectStore((s) => s.updateNote);
+  const updateNotes = useProjectStore((s) => s.updateNotes);
   const removeNote = useProjectStore((s) => s.removeNote);
+  const tracks = useProjectStore((s) => s.tracks);
   
   const snapBeats = gridSnapToBeats(gridSnap);
 
@@ -148,6 +150,17 @@ export default function NoteBlock({
       const startPitch = note.pitch;
       let lastPitch = startPitch;
 
+      // Get all selected notes for multi-drag
+      const currentTrack = tracks.find(t => t.id === trackId);
+      const selectedNotes = isSelected && selection.noteIds.length > 1 && currentTrack
+        ? currentTrack.notes.filter(n => selection.noteIds.includes(n.id))
+        : null;
+      
+      // Store initial positions of all selected notes
+      const initialPositions = selectedNotes
+        ? selectedNotes.map(n => ({ id: n.id, start: n.start, pitch: n.pitch }))
+        : null;
+
       const handleMouseMove = (e: MouseEvent) => {
         const deltaX = e.clientX - startX;
         const deltaY = e.clientY - startY;
@@ -155,9 +168,10 @@ export default function NoteBlock({
         const deltaBeat = deltaX / pixelsPerBeat;
         const deltaPitch = -Math.round(deltaY / noteHeight);
 
-        // Snap to grid
+        // Snap the delta to grid (based on the dragged note's movement)
         const rawStart = startBeat + deltaBeat;
         const snappedStart = Math.max(0, snapToGrid(rawStart, gridSnap));
+        const snappedDeltaBeat = snappedStart - startBeat;
         const newPitch = Math.max(minMidi, Math.min(maxMidi, startPitch + deltaPitch));
 
         // Play preview note if pitch changed
@@ -166,7 +180,20 @@ export default function NoteBlock({
           lastPitch = newPitch;
         }
 
-        updateNote(trackId, note.id, { start: snappedStart, pitch: newPitch });
+        // If multiple notes are selected, move them all together
+        if (initialPositions && initialPositions.length > 1) {
+          const noteUpdates = initialPositions.map(pos => ({
+            noteId: pos.id,
+            updates: {
+              start: Math.max(0, pos.start + snappedDeltaBeat),
+              pitch: Math.max(minMidi, Math.min(maxMidi, pos.pitch + deltaPitch)),
+            }
+          }));
+          updateNotes(trackId, noteUpdates);
+        } else {
+          // Single note drag
+          updateNote(trackId, note.id, { start: snappedStart, pitch: newPitch });
+        }
       };
 
       const handleMouseUp = () => {
@@ -178,7 +205,7 @@ export default function NoteBlock({
       document.addEventListener('mousemove', handleMouseMove);
       document.addEventListener('mouseup', handleMouseUp);
     }
-  }, [currentTool, note, trackId, isSelected, pixelsPerBeat, noteHeight, minMidi, maxMidi, updateNote, removeNote, addToSelection, setSelection, clearSelection, selection, gridSnap, snapBeats, playPreviewNote]);
+  }, [currentTool, note, trackId, isSelected, pixelsPerBeat, noteHeight, minMidi, maxMidi, updateNote, updateNotes, removeNote, addToSelection, setSelection, clearSelection, selection, gridSnap, snapBeats, playPreviewNote, tracks]);
 
   // Handle auxiliary click (middle mouse button)
   const handleAuxClick = useCallback((e: React.MouseEvent) => {
@@ -189,8 +216,9 @@ export default function NoteBlock({
     }
   }, [trackId, note.id, removeNote]);
 
-  // Calculate velocity-based opacity (0.4 to 1)
-  const opacity = 0.4 + note.velocity * 0.6;
+  // Calculate velocity-based opacity (0.4 to 1), but keep full opacity when dragging
+  const baseOpacity = 0.4 + note.velocity * 0.6;
+  const opacity = isDragging ? 1 : baseOpacity;
 
   return (
     <div
@@ -198,7 +226,6 @@ export default function NoteBlock({
       className={`
         absolute rounded-md cursor-pointer transition-shadow
         ${isSelected ? 'ring-2 ring-white ring-offset-1 ring-offset-[var(--color-bg-primary)]' : ''}
-        ${isDragging || isResizing ? 'z-10' : ''}
       `}
       style={{
         left,
@@ -207,7 +234,10 @@ export default function NoteBlock({
         height: noteHeight - 2,
         backgroundColor: trackColor,
         opacity,
-        boxShadow: `0 0 ${isSelected ? '12px' : '6px'} ${trackColor}80`,
+        zIndex: isDragging || isResizing ? 50 : isSelected ? 10 : 1,
+        boxShadow: isDragging 
+          ? `0 0 20px ${trackColor}, 0 4px 12px rgba(0,0,0,0.4)` 
+          : `0 0 ${isSelected ? '12px' : '6px'} ${trackColor}80`,
       }}
       onMouseDown={handleMouseDown}
       onAuxClick={handleAuxClick}

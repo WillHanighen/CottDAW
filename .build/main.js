@@ -24740,6 +24740,18 @@ var useProjectStore = create((set, get) => ({
       } : t)
     }));
   },
+  updateNotes: (trackId, noteUpdates) => {
+    const updateMap = new Map(noteUpdates.map((u) => [u.noteId, u.updates]));
+    set((state) => ({
+      tracks: state.tracks.map((t) => t.id === trackId ? {
+        ...t,
+        notes: t.notes.map((n) => {
+          const updates = updateMap.get(n.id);
+          return updates ? { ...n, ...updates } : n;
+        })
+      } : t)
+    }));
+  },
   removeNotes: (trackId, noteIds) => {
     const noteIdSet = new Set(noteIds);
     set((state) => ({
@@ -41873,7 +41885,9 @@ function NoteBlock({
   const setSelection = useUIStore((s) => s.setSelection);
   const clearSelection = useUIStore((s) => s.clearSelection);
   const updateNote = useProjectStore((s) => s.updateNote);
+  const updateNotes = useProjectStore((s) => s.updateNotes);
   const removeNote = useProjectStore((s) => s.removeNote);
+  const tracks = useProjectStore((s) => s.tracks);
   const snapBeats = gridSnapToBeats(gridSnap);
   const playPreviewNote = import_react8.useCallback(async (pitch) => {
     if (getContext().state !== "running") {
@@ -41952,6 +41966,9 @@ function NoteBlock({
       const startBeat = note.start;
       const startPitch = note.pitch;
       let lastPitch = startPitch;
+      const currentTrack = tracks.find((t) => t.id === trackId);
+      const selectedNotes = isSelected && selection.noteIds.length > 1 && currentTrack ? currentTrack.notes.filter((n) => selection.noteIds.includes(n.id)) : null;
+      const initialPositions = selectedNotes ? selectedNotes.map((n) => ({ id: n.id, start: n.start, pitch: n.pitch })) : null;
       const handleMouseMove = (e2) => {
         const deltaX = e2.clientX - startX;
         const deltaY = e2.clientY - startY;
@@ -41959,12 +41976,24 @@ function NoteBlock({
         const deltaPitch = -Math.round(deltaY / noteHeight);
         const rawStart = startBeat + deltaBeat;
         const snappedStart = Math.max(0, snapToGrid(rawStart, gridSnap));
+        const snappedDeltaBeat = snappedStart - startBeat;
         const newPitch = Math.max(minMidi, Math.min(maxMidi, startPitch + deltaPitch));
         if (newPitch !== lastPitch) {
           playPreviewNote(newPitch);
           lastPitch = newPitch;
         }
-        updateNote(trackId, note.id, { start: snappedStart, pitch: newPitch });
+        if (initialPositions && initialPositions.length > 1) {
+          const noteUpdates = initialPositions.map((pos) => ({
+            noteId: pos.id,
+            updates: {
+              start: Math.max(0, pos.start + snappedDeltaBeat),
+              pitch: Math.max(minMidi, Math.min(maxMidi, pos.pitch + deltaPitch))
+            }
+          }));
+          updateNotes(trackId, noteUpdates);
+        } else {
+          updateNote(trackId, note.id, { start: snappedStart, pitch: newPitch });
+        }
       };
       const handleMouseUp = () => {
         setIsDragging(false);
@@ -41974,7 +42003,7 @@ function NoteBlock({
       document.addEventListener("mousemove", handleMouseMove);
       document.addEventListener("mouseup", handleMouseUp);
     }
-  }, [currentTool, note, trackId, isSelected, pixelsPerBeat, noteHeight, minMidi, maxMidi, updateNote, removeNote, addToSelection, setSelection, clearSelection, selection, gridSnap, snapBeats, playPreviewNote]);
+  }, [currentTool, note, trackId, isSelected, pixelsPerBeat, noteHeight, minMidi, maxMidi, updateNote, updateNotes, removeNote, addToSelection, setSelection, clearSelection, selection, gridSnap, snapBeats, playPreviewNote, tracks]);
   const handleAuxClick = import_react8.useCallback((e) => {
     if (e.button === 1) {
       e.preventDefault();
@@ -41982,13 +42011,13 @@ function NoteBlock({
       removeNote(trackId, note.id);
     }
   }, [trackId, note.id, removeNote]);
-  const opacity = 0.4 + note.velocity * 0.6;
+  const baseOpacity = 0.4 + note.velocity * 0.6;
+  const opacity = isDragging ? 1 : baseOpacity;
   return /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("div", {
     ref: noteRef,
     className: `
         absolute rounded-md cursor-pointer transition-shadow
         ${isSelected ? "ring-2 ring-white ring-offset-1 ring-offset-[var(--color-bg-primary)]" : ""}
-        ${isDragging || isResizing ? "z-10" : ""}
       `,
     style: {
       left,
@@ -41997,7 +42026,8 @@ function NoteBlock({
       height: noteHeight - 2,
       backgroundColor: trackColor,
       opacity,
-      boxShadow: `0 0 ${isSelected ? "12px" : "6px"} ${trackColor}80`
+      zIndex: isDragging || isResizing ? 50 : isSelected ? 10 : 1,
+      boxShadow: isDragging ? `0 0 20px ${trackColor}, 0 4px 12px rgba(0,0,0,0.4)` : `0 0 ${isSelected ? "12px" : "6px"} ${trackColor}80`
     },
     onMouseDown: handleMouseDown,
     onAuxClick: handleAuxClick,
@@ -42785,4 +42815,4 @@ root.render(/* @__PURE__ */ jsx_dev_runtime13.jsxDEV(import_react12.default.Stri
   children: /* @__PURE__ */ jsx_dev_runtime13.jsxDEV(App, {}, undefined, false, undefined, this)
 }, undefined, false, undefined, this));
 
-//# debugId=A9C183F2855BEA4164756E2164756E21
+//# debugId=F7CE5484DA8B88F664756E2164756E21

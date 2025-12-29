@@ -112,6 +112,7 @@ interface ProjectState {
   addNote: (trackId: string, note: Omit<Note, 'id'>) => void;
   removeNote: (trackId: string, noteId: string) => void;
   updateNote: (trackId: string, noteId: string, updates: Partial<Note>) => void;
+  updateNotes: (trackId: string, noteUpdates: { noteId: string; updates: Partial<Note> }[]) => void;
   removeNotes: (trackId: string, noteIds: string[]) => void;
   
   // Actions - Import/Export
@@ -244,6 +245,23 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
               notes: t.notes.map((n) =>
                 n.id === noteId ? { ...n, ...updates } : n
               ),
+            }
+          : t
+      ),
+    }));
+  },
+
+  updateNotes: (trackId, noteUpdates) => {
+    const updateMap = new Map(noteUpdates.map(u => [u.noteId, u.updates]));
+    set((state) => ({
+      tracks: state.tracks.map((t) =>
+        t.id === trackId
+          ? {
+              ...t,
+              notes: t.notes.map((n) => {
+                const updates = updateMap.get(n.id);
+                return updates ? { ...n, ...updates } : n;
+              }),
             }
           : t
       ),
