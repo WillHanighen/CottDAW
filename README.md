@@ -5,12 +5,14 @@ A modern, web-based Digital Audio Workstation (DAW) built with BunJS, React, and
 ## Features
 
 ### Audio Engine
+
 - **Waveform Types**: Sine, Square, Sawtooth, Triangle oscillators
 - **ADSR Envelope**: Attack, Decay, Sustain, Release controls per track
 - **Effects Chain**: Reverb, Delay, Filter (lowpass/highpass), and Distortion
 - **Real-time Playback**: Powered by Tone.js and Web Audio API
 
 ### Piano Roll Editor
+
 - **Multi-track Composition**: Create multiple tracks with different instruments
 - **Note Drawing Tools**: Pencil (P), Eraser (E), Selection (V)
 - **Grid Snap**: 1/4, 1/8, 1/16, 1/32 note quantization
@@ -18,11 +20,13 @@ A modern, web-based Digital Audio Workstation (DAW) built with BunJS, React, and
 - **Velocity Support**: Each note has individual velocity
 
 ### Track Controls
+
 - **Volume & Pan**: Per-track mixing controls with visual knobs
 - **Mute/Solo**: Standard DAW workflow controls
 - **Color Coding**: Each track gets a unique vibrant color
 
 ### Transport
+
 - **Playback Controls**: Play, Pause, Stop, Seek
 - **BPM Control**: 40-240 BPM range
 - **Time Signature**: 4/4, 3/4, 6/8, 2/4, 5/4
@@ -30,6 +34,7 @@ A modern, web-based Digital Audio Workstation (DAW) built with BunJS, React, and
 - **Metronome**: With volume control
 
 ### File Operations
+
 - **Save/Load Projects**: Export and import JSON project files
 - **WAV Export**: Render your composition to a WAV file
 
@@ -77,7 +82,7 @@ The app will be available at `http://localhost:3000`
 ### Keyboard Shortcuts
 
 | Key | Action |
-|-----|--------|
+| ----- | -------- |
 | `Space` | Play/Pause |
 | `P` | Pencil tool |
 | `E` | Eraser tool |
@@ -92,7 +97,7 @@ The app will be available at `http://localhost:3000`
 
 ## Project Structure
 
-```
+```bash
 CottDAW/
 ├── index.ts                 # Bun server entry
 ├── src/
@@ -111,4 +116,4 @@ CottDAW/
 
 ## License
 
-MIT
+CC-BY-SA
