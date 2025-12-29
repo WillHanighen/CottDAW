@@ -24598,6 +24598,53 @@ function setColorIndex(index) {
   colorIndex = index;
 }
 
+// src/stores/historyStore.ts
+var MAX_HISTORY = 50;
+var useHistoryStore = create((set, get) => ({
+  past: [],
+  future: [],
+  maxHistory: MAX_HISTORY,
+  pushState: (tracks) => {
+    const snapshot = new Map;
+    tracks.forEach((track) => {
+      snapshot.set(track.id, JSON.parse(JSON.stringify(track.notes)));
+    });
+    set((state) => {
+      const newPast = [...state.past, snapshot];
+      if (newPast.length > state.maxHistory) {
+        newPast.shift();
+      }
+      return {
+        past: newPast,
+        future: []
+      };
+    });
+  },
+  undo: (currentState) => {
+    const state = get();
+    if (state.past.length === 0)
+      return null;
+    const newPast = [...state.past];
+    const previousState = newPast.pop();
+    const newFuture = currentState ? [currentState, ...state.future] : state.future;
+    set({ past: newPast, future: newFuture });
+    return previousState;
+  },
+  redo: (currentState) => {
+    const state = get();
+    if (state.future.length === 0)
+      return null;
+    const newFuture = [...state.future];
+    const nextState = newFuture.shift();
+    const newPast = currentState ? [...state.past, currentState] : state.past;
+    set({ future: newFuture, past: newPast });
+    return nextState;
+  },
+  canUndo: () => get().past.length > 0,
+  canRedo: () => get().future.length > 0,
+  clear: () => set({ past: [], future: [] })
+}));
+
 // src/stores/projectStore.ts
 var STORAGE_KEY2 = "cottdaw-project";
 function loadFromStorage2() {
@@ -24756,6 +24803,70 @@ var useProjectStore = create((set, get) => ({
     const noteIdSet = new Set(noteIds);
     set((state) => ({
       tracks: state.tracks.map((t) => t.id === trackId ? { ...t, notes: t.notes.filter((n) => !noteIdSet.has(n.id)) } : t)
+    }));
+  },
+  duplicateNotes: (trackId, noteIds) => {
+    const state = get();
+    const track = state.tracks.find((t) => t.id === trackId);
+    if (!track)
+      return [];
+    const noteIdSet = new Set(noteIds);
+    const notesToDuplicate = track.notes.filter((n) => noteIdSet.has(n.id));
+    const newNotes = notesToDuplicate.map((n) => ({
+      ...n,
+      id: v4_default()
+    }));
+    set((state2) => ({
+      tracks: state2.tracks.map((t) => t.id === trackId ? { ...t, notes: [...t.notes, ...newNotes] } : t)
+    }));
+    return newNotes.map((n) => n.id);
+  },
+  saveToHistory: () => {
+    const state = get();
+    useHistoryStore.getState().pushState(state.tracks);
+  },
+  undo: () => {
+    const state = get();
+    const historyState = useHistoryStore.getState();
+    if (!historyState.canUndo())
+      return;
+    const currentSnapshot = new Map;
+    state.tracks.forEach((track) => {
+      currentSnapshot.set(track.id, JSON.parse(JSON.stringify(track.notes)));
+    });
+    const previousSnapshot = historyState.undo(currentSnapshot);
+    if (!previousSnapshot)
+      return;
+    set((state2) => ({
+      tracks: state2.tracks.map((track) => {
+        const previousNotes = previousSnapshot.get(track.id);
+        if (previousNotes !== undefined) {
+          return { ...track, notes: previousNotes };
+        }
+        return track;
+      })
+    }));
+  },
+  redo: () => {
+    const state = get();
+    const historyState = useHistoryStore.getState();
+    if (!historyState.canRedo())
+      return;
+    const currentSnapshot = new Map;
+    state.tracks.forEach((track) => {
+      currentSnapshot.set(track.id, JSON.parse(JSON.stringify(track.notes)));
+    });
+    const nextSnapshot = historyState.redo(currentSnapshot);
+    if (!nextSnapshot)
+      return;
+    set((state2) => ({
+      tracks: state2.tracks.map((track) => {
+        const nextNotes = nextSnapshot.get(track.id);
+        if (nextNotes !== undefined) {
+          return { ...track, notes: nextNotes };
+        }
+        return track;
+      })
     }));
   },
   exportProject: () => {
@@ -41888,6 +41999,7 @@ function NoteBlock({
   const updateNotes = useProjectStore((s) => s.updateNotes);
   const removeNote = useProjectStore((s) => s.removeNote);
   const tracks = useProjectStore((s) => s.tracks);
+  const saveToHistory = useProjectStore((s) => s.saveToHistory);
   const snapBeats = gridSnapToBeats(gridSnap);
   const playPreviewNote = import_react8.useCallback(async (pitch) => {
     if (getContext().state !== "running") {
@@ -41910,12 +42022,14 @@ function NoteBlock({
     e.stopPropagation();
     if (e.button === 1) {
       e.preventDefault();
+      saveToHistory();
       removeNote(trackId, note.id);
       return;
     }
     if (e.button !== 0)
       return;
     if (currentTool === "eraser") {
+      saveToHistory();
       removeNote(trackId, note.id);
       return;
     }
@@ -41925,6 +42039,7 @@ function NoteBlock({
         const isResizeHandle = e.clientX > rect.right - 10;
         if (isResizeHandle) {
           setIsResizing(true);
+          saveToHistory();
           const startX2 = e.clientX;
           const startDuration = note.duration;
           const handleMouseMove2 = (e2) => {
@@ -41961,6 +42076,7 @@ function NoteBlock({
         }
       }
       setIsDragging(true);
+      saveToHistory();
       const startX = e.clientX;
       const startY = e.clientY;
       const startBeat = note.start;
@@ -42003,14 +42119,15 @@ function NoteBlock({
       document.addEventListener("mousemove", handleMouseMove);
       document.addEventListener("mouseup", handleMouseUp);
     }
-  }, [currentTool, note, trackId, isSelected, pixelsPerBeat, noteHeight, minMidi, maxMidi, updateNote, updateNotes, removeNote, addToSelection, setSelection, clearSelection, selection, gridSnap, snapBeats, playPreviewNote, tracks]);
+  }, [currentTool, note, trackId, isSelected, pixelsPerBeat, noteHeight, minMidi, maxMidi, updateNote, updateNotes, removeNote, addToSelection, setSelection, clearSelection, selection, gridSnap, snapBeats, playPreviewNote, tracks, saveToHistory]);
   const handleAuxClick = import_react8.useCallback((e) => {
     if (e.button === 1) {
       e.preventDefault();
       e.stopPropagation();
+      saveToHistory();
       removeNote(trackId, note.id);
     }
-  }, [trackId, note.id, removeNote]);
+  }, [trackId, note.id, removeNote, saveToHistory]);
   const baseOpacity = 0.4 + note.velocity * 0.6;
   const opacity = isDragging ? 1 : baseOpacity;
   return /* @__PURE__ */ jsx_dev_runtime10.jsxDEV("div", {
@@ -42068,6 +42185,10 @@ function PianoRoll({ track }) {
   const addNote = useProjectStore((s) => s.addNote);
   const removeNote = useProjectStore((s) => s.removeNote);
   const removeNotes = useProjectStore((s) => s.removeNotes);
+  const duplicateNotes = useProjectStore((s) => s.duplicateNotes);
+  const saveToHistory = useProjectStore((s) => s.saveToHistory);
+  const undo = useProjectStore((s) => s.undo);
+  const redo = useProjectStore((s) => s.redo);
   const bpm = useProjectStore((s) => s.bpm);
   const timeSignature = useProjectStore((s) => s.timeSignature);
   const currentBeat = useTransportStore((s) => s.currentBeat);
@@ -42190,6 +42311,7 @@ function PianoRoll({ track }) {
     const startBeat = Math.min(drawStart.beat, snappedEnd);
     const endBeat = Math.max(drawStart.beat, snappedEnd);
     const duration = Math.max(snapBeats, endBeat - startBeat + snapBeats);
+    saveToHistory();
     addNote(track.id, {
       pitch: drawStart.pitch,
       start: startBeat,
@@ -42198,20 +42320,41 @@ function PianoRoll({ track }) {
     });
     setIsDrawing(false);
     setDrawStart(null);
-  }, [isDrawing, drawStart, isSelecting, selectionBox, gridSnap, snapBeats, pixelsPerBeat, noteHeight, getPositionFromEvent, addNote, addToSelection, setSelection, track]);
+  }, [isDrawing, drawStart, isSelecting, selectionBox, gridSnap, snapBeats, pixelsPerBeat, noteHeight, getPositionFromEvent, addNote, addToSelection, setSelection, track, saveToHistory]);
   import_react9.useEffect(() => {
     const handleKeyDown = (e) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)
+        return;
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "y" || e.key.toLowerCase() === "z" && e.shiftKey)) {
+        e.preventDefault();
+        redo();
+        return;
+      }
       if (e.key === "Delete" || e.key === "Backspace") {
         if (selection.noteIds.length > 0 && selection.trackId === track.id) {
           e.preventDefault();
+          saveToHistory();
           removeNotes(track.id, selection.noteIds);
           clearSelection();
+        }
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "d") {
+        if (selection.noteIds.length > 0 && selection.trackId === track.id) {
+          e.preventDefault();
+          saveToHistory();
+          const newNoteIds = duplicateNotes(track.id, selection.noteIds);
+          setSelection({ noteIds: newNoteIds, trackId: track.id });
         }
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selection, track.id, removeNotes, clearSelection]);
+  }, [selection, track.id, removeNotes, duplicateNotes, clearSelection, setSelection, saveToHistory, undo, redo]);
   import_react9.useEffect(() => {
     setExtraBeats(0);
   }, [track.notes.length]);
@@ -42815,4 +42958,4 @@ root.render(/* @__PURE__ */ jsx_dev_runtime13.jsxDEV(import_react12.default.Stri
   children: /* @__PURE__ */ jsx_dev_runtime13.jsxDEV(App, {}, undefined, false, undefined, this)
 }, undefined, false, undefined, this));
 
-//# debugId=F7CE5484DA8B88F664756E2164756E21
+//# debugId=9BD3E49652E33E0064756E2164756E21

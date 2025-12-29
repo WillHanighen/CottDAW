@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
 import type { Track, Note, Project, WaveType, Envelope, TrackEffects } from '../types/index.ts';
 import { getNextTrackColor, resetColorIndex, setColorIndex } from '../utils/colorPalette.ts';
+import { useHistoryStore } from './historyStore.ts';
 
 const STORAGE_KEY = 'cottdaw-project';
 
@@ -114,6 +115,12 @@ interface ProjectState {
   updateNote: (trackId: string, noteId: string, updates: Partial<Note>) => void;
   updateNotes: (trackId: string, noteUpdates: { noteId: string; updates: Partial<Note> }[]) => void;
   removeNotes: (trackId: string, noteIds: string[]) => void;
+  duplicateNotes: (trackId: string, noteIds: string[]) => string[];
+  
+  // Actions - History
+  saveToHistory: () => void;
+  undo: () => void;
+  redo: () => void;
   
   // Actions - Import/Export
   exportProject: () => Project;
@@ -276,6 +283,93 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           ? { ...t, notes: t.notes.filter((n) => !noteIdSet.has(n.id)) }
           : t
       ),
+    }));
+  },
+
+  duplicateNotes: (trackId, noteIds) => {
+    const state = get();
+    const track = state.tracks.find(t => t.id === trackId);
+    if (!track) return [];
+
+    const noteIdSet = new Set(noteIds);
+    const notesToDuplicate = track.notes.filter(n => noteIdSet.has(n.id));
+    
+    // Create new notes with new IDs (same position - user will drag them)
+    const newNotes: Note[] = notesToDuplicate.map(n => ({
+      ...n,
+      id: uuidv4(),
+    }));
+
+    set((state) => ({
+      tracks: state.tracks.map((t) =>
+        t.id === trackId
+          ? { ...t, notes: [...t.notes, ...newNotes] }
+          : t
+      ),
+    }));
+
+    return newNotes.map(n => n.id);
+  },
+
+  // History actions
+  saveToHistory: () => {
+    const state = get();
+    useHistoryStore.getState().pushState(state.tracks);
+  },
+
+  undo: () => {
+    const state = get();
+    const historyState = useHistoryStore.getState();
+    
+    if (!historyState.canUndo()) return;
+    
+    // Create snapshot of current state to save to future
+    const currentSnapshot: Map<string, Note[]> = new Map();
+    state.tracks.forEach(track => {
+      currentSnapshot.set(track.id, JSON.parse(JSON.stringify(track.notes)));
+    });
+    
+    // Get the previous state (pass current state so it can be saved to future)
+    const previousSnapshot = historyState.undo(currentSnapshot);
+    if (!previousSnapshot) return;
+    
+    // Apply the previous state
+    set((state) => ({
+      tracks: state.tracks.map(track => {
+        const previousNotes = previousSnapshot.get(track.id);
+        if (previousNotes !== undefined) {
+          return { ...track, notes: previousNotes };
+        }
+        return track;
+      }),
+    }));
+  },
+
+  redo: () => {
+    const state = get();
+    const historyState = useHistoryStore.getState();
+    
+    if (!historyState.canRedo()) return;
+    
+    // Create snapshot of current state to save to past
+    const currentSnapshot: Map<string, Note[]> = new Map();
+    state.tracks.forEach(track => {
+      currentSnapshot.set(track.id, JSON.parse(JSON.stringify(track.notes)));
+    });
+    
+    // Get the next state (pass current state so it can be saved to past)
+    const nextSnapshot = historyState.redo(currentSnapshot);
+    if (!nextSnapshot) return;
+    
+    // Apply the next state
+    set((state) => ({
+      tracks: state.tracks.map(track => {
+        const nextNotes = nextSnapshot.get(track.id);
+        if (nextNotes !== undefined) {
+          return { ...track, notes: nextNotes };
+        }
+        return track;
+      }),
     }));
   },
 

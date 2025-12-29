@@ -45,6 +45,10 @@ export default function PianoRoll({ track }: PianoRollProps) {
   const addNote = useProjectStore((s) => s.addNote);
   const removeNote = useProjectStore((s) => s.removeNote);
   const removeNotes = useProjectStore((s) => s.removeNotes);
+  const duplicateNotes = useProjectStore((s) => s.duplicateNotes);
+  const saveToHistory = useProjectStore((s) => s.saveToHistory);
+  const undo = useProjectStore((s) => s.undo);
+  const redo = useProjectStore((s) => s.redo);
   const bpm = useProjectStore((s) => s.bpm);
   const timeSignature = useProjectStore((s) => s.timeSignature);
 
@@ -224,6 +228,7 @@ export default function PianoRoll({ track }: PianoRollProps) {
     const endBeat = Math.max(drawStart.beat, snappedEnd);
     const duration = Math.max(snapBeats, endBeat - startBeat + snapBeats);
 
+    saveToHistory();
     addNote(track.id, {
       pitch: drawStart.pitch,
       start: startBeat,
@@ -233,23 +238,53 @@ export default function PianoRoll({ track }: PianoRollProps) {
 
     setIsDrawing(false);
     setDrawStart(null);
-  }, [isDrawing, drawStart, isSelecting, selectionBox, gridSnap, snapBeats, pixelsPerBeat, noteHeight, getPositionFromEvent, addNote, addToSelection, setSelection, track]);
+  }, [isDrawing, drawStart, isSelecting, selectionBox, gridSnap, snapBeats, pixelsPerBeat, noteHeight, getPositionFromEvent, addNote, addToSelection, setSelection, track, saveToHistory]);
 
-  // Delete selected notes on Delete/Backspace
+  // Keyboard shortcuts for notes (Delete, Duplicate, Undo, Redo)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Skip if typing in an input
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      
+      // Undo (Ctrl+Z)
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+        return;
+      }
+      
+      // Redo (Ctrl+Y or Ctrl+Shift+Z)
+      if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) {
+        e.preventDefault();
+        redo();
+        return;
+      }
+      
+      // Delete selected notes
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (selection.noteIds.length > 0 && selection.trackId === track.id) {
           e.preventDefault();
+          saveToHistory();
           removeNotes(track.id, selection.noteIds);
           clearSelection();
+        }
+      }
+      
+      // Duplicate selected notes (Ctrl+D)
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
+        if (selection.noteIds.length > 0 && selection.trackId === track.id) {
+          e.preventDefault();
+          saveToHistory();
+          const newNoteIds = duplicateNotes(track.id, selection.noteIds);
+          // Select the new notes so they're ready to be dragged
+          setSelection({ noteIds: newNoteIds, trackId: track.id });
         }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selection, track.id, removeNotes, clearSelection]);
+  }, [selection, track.id, removeNotes, duplicateNotes, clearSelection, setSelection, saveToHistory, undo, redo]);
 
   // Reset extra beats when notes are added (the grid will recalculate based on actual notes)
   useEffect(() => {

@@ -44,6 +44,7 @@ export default function NoteBlock({
   const updateNotes = useProjectStore((s) => s.updateNotes);
   const removeNote = useProjectStore((s) => s.removeNote);
   const tracks = useProjectStore((s) => s.tracks);
+  const saveToHistory = useProjectStore((s) => s.saveToHistory);
   
   const snapBeats = gridSnapToBeats(gridSnap);
 
@@ -77,6 +78,7 @@ export default function NoteBlock({
     // Middle-click to delete
     if (e.button === 1) {
       e.preventDefault();
+      saveToHistory();
       removeNote(trackId, note.id);
       return;
     }
@@ -85,6 +87,7 @@ export default function NoteBlock({
     if (e.button !== 0) return;
 
     if (currentTool === 'eraser') {
+      saveToHistory();
       removeNote(trackId, note.id);
       return;
     }
@@ -98,6 +101,7 @@ export default function NoteBlock({
         
         if (isResizeHandle) {
           setIsResizing(true);
+          saveToHistory(); // Save before resize
           const startX = e.clientX;
           const startDuration = note.duration;
 
@@ -144,6 +148,7 @@ export default function NoteBlock({
 
       // Start dragging
       setIsDragging(true);
+      saveToHistory(); // Save before drag
       const startX = e.clientX;
       const startY = e.clientY;
       const startBeat = note.start;
@@ -205,16 +210,17 @@ export default function NoteBlock({
       document.addEventListener('mousemove', handleMouseMove);
       document.addEventListener('mouseup', handleMouseUp);
     }
-  }, [currentTool, note, trackId, isSelected, pixelsPerBeat, noteHeight, minMidi, maxMidi, updateNote, updateNotes, removeNote, addToSelection, setSelection, clearSelection, selection, gridSnap, snapBeats, playPreviewNote, tracks]);
+  }, [currentTool, note, trackId, isSelected, pixelsPerBeat, noteHeight, minMidi, maxMidi, updateNote, updateNotes, removeNote, addToSelection, setSelection, clearSelection, selection, gridSnap, snapBeats, playPreviewNote, tracks, saveToHistory]);
 
   // Handle auxiliary click (middle mouse button)
   const handleAuxClick = useCallback((e: React.MouseEvent) => {
     if (e.button === 1) {
       e.preventDefault();
       e.stopPropagation();
+      saveToHistory();
       removeNote(trackId, note.id);
     }
-  }, [trackId, note.id, removeNote]);
+  }, [trackId, note.id, removeNote, saveToHistory]);
 
   // Calculate velocity-based opacity (0.4 to 1), but keep full opacity when dragging
   const baseOpacity = 0.4 + note.velocity * 0.6;
