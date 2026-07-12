@@ -1,11 +1,11 @@
 //! Realtime-safe engine messaging and offline renderer.
 
-use crate::clips::ScheduledMidiEvent;
+use crate::clips::{midi_panic_events, notes_held_at, ScheduledMidiEvent};
 use crate::dsp::{
     AudioBuffer, MeterState, NullPluginHost, PluginAudioHost, ProcessContext, SampleCache,
     process_block,
 };
-use crate::graph::CompiledPlan;
+use crate::graph::{CompiledPlan, NodeKind};
 use crate::ids::{NodeId, TrackId};
 use crate::project::Project;
 use crate::time::{SamplePos, TempoMap, TransportState};
@@ -142,6 +142,8 @@ pub struct AudioProcessor {
     previews: Vec<NotePreview>,
     /// Note-offs queued when a preview is replaced/cancelled.
     pending_preview_midi: Vec<(TrackId, ScheduledMidiEvent)>,
+    /// All-notes/sound-off queued on transport discontinuities (stop/seek/loop).
+    pending_panic_midi: Vec<(TrackId, ScheduledMidiEvent)>,
     /// Persistent PDC delay rings keyed by node.
     pdc_state: IndexMap<NodeId, Vec<Vec<f32>>>,
 }
@@ -164,7 +166,71 @@ impl AudioProcessor {
             running: Arc::new(AtomicBool::new(true)),
             previews: Vec::new(),
             pending_preview_midi: Vec::new(),
+            pending_panic_midi: Vec::new(),
             pdc_state: IndexMap::new(),
+        }
+    }
+
+    /// Silence every instrument voice on a transport discontinuity.
+    ///
+    /// Arrangement MIDI is streaming — note-offs may never be delivered if
+    /// transport stops, seeks, or loops mid-note. Real VST3 plugins also ignore
+    /// CC 120/123 (truce-rack drops ControlChange), so we emit **real NoteOff**
+    /// for every currently held arrangement/preview note, plus CC panic for
+    /// FakePlugin / workers that expand CC into note-offs.
+    fn queue_midi_panic(&mut self) {
+        self.pending_panic_midi.clear();
+
+        // Release active piano-roll previews with real note-offs.
+        for p in self.previews.drain(..) {
+            if p.sent_on {
+                self.pending_panic_midi.push((
+                    p.track_id,
+                    ScheduledMidiEvent::note_off(0, p.pitch, p.channel),
+                ));
+            }
+        }
+        self.pending_preview_midi.clear();
+
+        let mut tracks = Vec::new();
+        for node in self.plan.nodes.values() {
+            if let NodeKind::MidiClipSource { track_id } = &node.kind {
+                if !tracks.contains(track_id) {
+                    tracks.push(*track_id);
+                }
+            }
+        }
+
+        // Hold position used for "which notes are latched" — prefer the sample
+        // just before a loop wrap so notes ending exactly on the boundary are
+        // still considered held if their off was never delivered.
+        let hold_pos = SamplePos(self.position.0.saturating_sub(1));
+
+        for track_id in tracks {
+            for (pitch, channel) in notes_held_at(&self.clips, track_id, &self.tempo, hold_pos) {
+                self.pending_panic_midi.push((
+                    track_id,
+                    ScheduledMidiEvent::note_off(0, pitch, channel),
+                ));
+            }
+            // Nuclear fallback: note-off every pitch on ch 0. Covers overlapping
+            // clip duplicates / stolen voices that notes_held_at may miss.
+            // 128 events × tracks still fits comfortably under MAX_MIDI_EVENTS
+            // for typical session sizes; we cap tracks if needed below.
+            for pitch in 0u8..=127 {
+                self.pending_panic_midi.push((
+                    track_id,
+                    ScheduledMidiEvent::note_off(0, pitch, 0),
+                ));
+            }
+            self.pending_panic_midi
+                .extend(midi_panic_events(track_id));
+        }
+
+        // Keep SHM MIDI under the 512-event cap (leave room for same-block note-ons).
+        const MAX_PANIC_EVENTS: usize = 480;
+        if self.pending_panic_midi.len() > MAX_PANIC_EVENTS {
+            self.pending_panic_midi.truncate(MAX_PANIC_EVENTS);
         }
     }
 
@@ -178,6 +244,24 @@ impl AudioProcessor {
                     self.plan = plan;
                 }
                 EngineCommand::SetTransport(state) => {
+                    let leaving_play =
+                        self.transport == TransportState::Playing && state != TransportState::Playing;
+                    if leaving_play || state == TransportState::Stopped {
+                        self.queue_midi_panic();
+                    }
+                    // Entering play: kill any dangling preview voices so they
+                    // can't stack with arrangement MIDI (orphan voice hang).
+                    if state == TransportState::Playing && !self.previews.is_empty() {
+                        for p in self.previews.drain(..) {
+                            if p.sent_on {
+                                self.pending_panic_midi.push((
+                                    p.track_id,
+                                    ScheduledMidiEvent::note_off(0, p.pitch, p.channel),
+                                ));
+                            }
+                        }
+                        self.pending_preview_midi.clear();
+                    }
                     self.transport = state;
                     self.shared.set_state(state);
                     if state == TransportState::Stopped {
@@ -186,6 +270,8 @@ impl AudioProcessor {
                     }
                 }
                 EngineCommand::Seek(pos) => {
+                    // Seeking orphans any in-flight note-offs from streaming MIDI.
+                    self.queue_midi_panic();
                     self.position = pos;
                     self.shared.set_position(pos);
                 }
@@ -221,6 +307,11 @@ impl AudioProcessor {
         velocity: u8,
         duration_samples: u32,
     ) {
+        // Preview + arrangement on the same pitch creates two note-ons and one
+        // note-off → orphan voice that hangs after a partial release.
+        if self.transport == TransportState::Playing {
+            return;
+        }
         // Retrigger: note-off any active previews on this track first.
         let mut i = 0;
         while i < self.previews.len() {
@@ -272,7 +363,11 @@ impl AudioProcessor {
                 i += 1;
             }
         }
-        events.sort_by_key(|(_, e)| e.sample_offset);
+        events.sort_by(|(_, a), (_, b)| {
+            a.sample_offset
+                .cmp(&b.sample_offset)
+                .then_with(|| a.sort_priority().cmp(&b.sort_priority()))
+        });
         events
     }
 
@@ -289,10 +384,19 @@ impl AudioProcessor {
             return;
         }
         let playing = self.transport == TransportState::Playing;
+        // Drain panic MIDI first so instruments receive CC 120/123 even when
+        // transport is already Stopped (graph would otherwise be skipped).
+        let mut preview_midi = std::mem::take(&mut self.pending_panic_midi);
+        let flush_panic = !preview_midi.is_empty();
         let had_preview_work =
             !self.previews.is_empty() || !self.pending_preview_midi.is_empty();
-        let preview_midi = self.tick_previews(frames as u32);
-        let audition = had_preview_work || !preview_midi.is_empty();
+        preview_midi.extend(self.tick_previews(frames as u32));
+        preview_midi.sort_by(|(_, a), (_, b)| {
+            a.sample_offset
+                .cmp(&b.sample_offset)
+                .then_with(|| a.sort_priority().cmp(&b.sort_priority()))
+        });
+        let audition = had_preview_work || !preview_midi.is_empty() || flush_panic;
 
         let rendered = if playing || audition {
             let host_ref = plugin_host;
@@ -331,6 +435,8 @@ impl AudioProcessor {
             self.position = self.position.saturating_add(frames as i64);
             if self.loop_enabled && self.loop_end.0 > self.loop_start.0 {
                 if self.position.0 >= self.loop_end.0 {
+                    // Loop jump orphans streaming note-offs — panic before next block.
+                    self.queue_midi_panic();
                     self.position = self.loop_start;
                 }
             }
@@ -437,7 +543,8 @@ pub fn render_with_null_plugins(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::clips::{Clip, MidiNote};
+    use crate::clips::{Clip, MidiNote, ScheduledMidiEvent};
+    use crate::ids::PluginInstanceId;
 
     #[test]
     fn offline_render_produces_audio_for_midi() {
@@ -454,5 +561,120 @@ mod tests {
         let cache = SampleCache::default();
         let out = render_with_null_plugins(&project, &cache, 48_000);
         assert!(out.peak() > 0.0);
+    }
+
+    /// Host that records MIDI delivered to instruments (for panic flush tests).
+    struct RecordingHost {
+        last_midi: Vec<ScheduledMidiEvent>,
+    }
+
+    impl PluginAudioHost for RecordingHost {
+        fn process_instrument(
+            &mut self,
+            _instance: PluginInstanceId,
+            midi: &[ScheduledMidiEvent],
+            output: &mut AudioBuffer,
+            _ctx: &crate::dsp::TransportBlockInfo,
+        ) -> bool {
+            self.last_midi = midi.to_vec();
+            output.clear();
+            true
+        }
+
+        fn process_effect(
+            &mut self,
+            _instance: PluginInstanceId,
+            input: &AudioBuffer,
+            output: &mut AudioBuffer,
+            _ctx: &crate::dsp::TransportBlockInfo,
+        ) -> bool {
+            *output = input.clone();
+            true
+        }
+    }
+
+    #[test]
+    fn stop_flushes_midi_panic_to_instruments() {
+        let mut project = Project::new("panic");
+        let track = project.add_midi_track("Synth");
+        let _ =
+            project.attach_instrument(track, "stub".into(), "/dev/null".into(), "Stub".into());
+
+        let shared = Arc::new(SharedTransport::new());
+        let mut proc = AudioProcessor::new(shared);
+        proc.plan = Arc::new(project.compiled_plan());
+        proc.clips = Arc::new(project.clips.clone());
+        proc.transport = TransportState::Playing;
+
+        let (mut cmd_tx, mut cmd_rx) = RingBuffer::new(8);
+        let (mut evt_tx, _evt_rx) = RingBuffer::new(16);
+        let mut host = RecordingHost {
+            last_midi: Vec::new(),
+        };
+        let mut out = vec![0.0f32; 512 * 2];
+
+        // Stop mid-note: arrangement note-offs are gated off when not Playing,
+        // so without panic the instrument would keep sounding.
+        let _ = cmd_tx.push(EngineCommand::SetTransport(TransportState::Stopped));
+        proc.handle_commands(&mut cmd_rx);
+        proc.process(&mut out, 2, 512, 48_000, &mut host, &mut evt_tx);
+
+        assert!(
+            host.last_midi
+                .iter()
+                .any(|e| e.status & 0xf0 == 0xb0 && e.data1 == 123),
+            "expected All Notes Off (CC 123) after stop, got {:?}",
+            host.last_midi
+        );
+        assert!(
+            host.last_midi
+                .iter()
+                .any(|e| e.status & 0xf0 == 0xb0 && e.data1 == 120),
+            "expected All Sound Off (CC 120) after stop, got {:?}",
+            host.last_midi
+        );
+        // Real VST3 plugins ignore CC — host must also send NoteOff events.
+        assert!(
+            host.last_midi
+                .iter()
+                .filter(|e| e.status & 0xf0 == 0x80)
+                .count()
+                >= 128,
+            "expected NoteOff storm for VST3 (got {} note-offs)",
+            host.last_midi
+                .iter()
+                .filter(|e| e.status & 0xf0 == 0x80)
+                .count()
+        );
+    }
+
+    #[test]
+    fn seek_queues_midi_panic() {
+        let mut project = Project::new("seek");
+        let track = project.add_midi_track("Synth");
+        let _ =
+            project.attach_instrument(track, "stub".into(), "/dev/null".into(), "Stub".into());
+
+        let shared = Arc::new(SharedTransport::new());
+        let mut proc = AudioProcessor::new(shared);
+        proc.plan = Arc::new(project.compiled_plan());
+
+        let (mut cmd_tx, mut cmd_rx) = RingBuffer::new(8);
+        let (mut evt_tx, _evt_rx) = RingBuffer::new(16);
+        let mut host = RecordingHost {
+            last_midi: Vec::new(),
+        };
+        let mut out = vec![0.0f32; 256 * 2];
+
+        let _ = cmd_tx.push(EngineCommand::Seek(SamplePos(1000)));
+        proc.handle_commands(&mut cmd_rx);
+        proc.process(&mut out, 2, 256, 48_000, &mut host, &mut evt_tx);
+
+        assert!(
+            host.last_midi
+                .iter()
+                .any(|e| e.status & 0xf0 == 0xb0 && e.data1 == 123),
+            "expected panic MIDI after seek"
+        );
     }
 }

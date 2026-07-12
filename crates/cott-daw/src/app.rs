@@ -805,10 +805,13 @@ impl CottApp {
         match rx.try_recv() {
             Ok(Ok(path)) => {
                 self.export_rx = None;
+                // Bounce shares the live PluginHost — flush any latched voices.
+                self.flush_instrument_voices();
                 self.status = format!("Exported {}", path.display());
             }
             Ok(Err(e)) => {
                 self.export_rx = None;
+                self.flush_instrument_voices();
                 self.status = format!("Export failed: {e}");
             }
             Err(mpsc::TryRecvError::Empty) => {}
@@ -816,6 +819,14 @@ impl CottApp {
                 self.export_rx = None;
                 self.status = "Export interrupted".into();
             }
+        }
+    }
+
+    /// Ask the engine to send MIDI panic so VST voices don't stay latched.
+    fn flush_instrument_voices(&mut self) {
+        if let Some(audio) = &mut self.audio {
+            let pos = audio.shared.position();
+            let _ = audio.cmd_tx.push(EngineCommand::Seek(pos));
         }
     }
 

@@ -444,9 +444,31 @@ impl VstPlugin {
             .midi_count
             .min(cott_ipc::MAX_MIDI_EVENTS as u32) as usize;
         let mut events = EventList::new();
+        // VST3 IEventList has no ControlChange — truce-rack drops CC. Expand
+        // All Notes/Sound Off into NoteOff storms so real plugins release.
+        let mut panicked_channels = [false; 16];
         for ev in &shm.midi_mut()[..midi_count] {
             let channel = ev.status & 0x0f;
-            let body = match ev.status & 0xf0 {
+            let status = ev.status & 0xf0;
+            if status == 0xb0 && (ev.data1 == 120 || ev.data1 == 123) {
+                let ch = (channel as usize).min(15);
+                if panicked_channels[ch] {
+                    continue;
+                }
+                panicked_channels[ch] = true;
+                for note in 0u8..=127 {
+                    events.push(Event {
+                        sample_offset: ev.sample_offset,
+                        body: EventBody::Midi(MidiData::NoteOff {
+                            channel,
+                            note,
+                            velocity: 0,
+                        }),
+                    });
+                }
+                continue;
+            }
+            let body = match status {
                 0x90 if ev.data2 > 0 => EventBody::Midi(MidiData::NoteOn {
                     channel,
                     note: ev.data1,

@@ -197,6 +197,76 @@ impl ScheduledMidiEvent {
             data2: 0,
         }
     }
+
+    /// MIDI CC 123 — All Notes Off (channel mode message).
+    pub fn all_notes_off(sample_offset: u32, channel: u8) -> Self {
+        Self {
+            sample_offset,
+            status: 0xB0 | (channel & 0x0f),
+            data1: 123,
+            data2: 0,
+        }
+    }
+
+    /// MIDI CC 120 — All Sound Off (immediate silence, including hanging notes).
+    pub fn all_sound_off(sample_offset: u32, channel: u8) -> Self {
+        Self {
+            sample_offset,
+            status: 0xB0 | (channel & 0x0f),
+            data1: 120,
+            data2: 0,
+        }
+    }
+
+    /// Sort key so panic / note-off land before note-on at the same sample offset.
+    pub fn sort_priority(self) -> u8 {
+        match self.status & 0xf0 {
+            0xb0 if self.data1 == 120 || self.data1 == 123 => 0,
+            0x80 => 1,
+            0x90 if self.data2 == 0 => 1,
+            0x90 => 3,
+            _ => 2,
+        }
+    }
+}
+
+/// Queue all-notes-off + all-sound-off on every MIDI channel for a track.
+pub fn midi_panic_events(track_id: TrackId) -> Vec<(TrackId, ScheduledMidiEvent)> {
+    let mut events = Vec::with_capacity(32);
+    for ch in 0..16u8 {
+        events.push((track_id, ScheduledMidiEvent::all_notes_off(0, ch)));
+        events.push((track_id, ScheduledMidiEvent::all_sound_off(0, ch)));
+    }
+    events
+}
+
+/// Notes whose note-on has already occurred and note-off has not, at `pos`.
+///
+/// Used to inject real note-offs on transport discontinuities — VST3 hosts
+/// drop MIDI CC panic, so we must release voices with NoteOff events.
+pub fn notes_held_at(
+    clips: &[Clip],
+    track_id: TrackId,
+    tempo: &crate::time::TempoMap,
+    pos: SamplePos,
+) -> Vec<(u8, u8)> {
+    let mut held = Vec::new();
+    for clip in clips.iter().filter(|c| c.track_id == track_id) {
+        let Some(notes) = clip.notes() else { continue };
+        for note in notes {
+            let abs_on = clip.start_beats + note.start_beats;
+            let abs_off = abs_on + note.length_beats;
+            let on_sample = tempo.beat_to_sample(BeatPos(abs_on));
+            let off_sample = tempo.beat_to_sample(BeatPos(abs_off));
+            if on_sample.0 <= pos.0 && pos.0 < off_sample.0 {
+                let key = (note.pitch.min(127), note.channel & 0x0f);
+                if !held.contains(&key) {
+                    held.push(key);
+                }
+            }
+        }
+    }
+    held
 }
 
 /// Collect MIDI events from clips overlapping `[block_start, block_start + block_len)`.
@@ -241,7 +311,11 @@ pub fn schedule_midi_for_block(
             }
         }
     }
-    events.sort_by_key(|e| e.sample_offset);
+    events.sort_by(|a, b| {
+        a.sample_offset
+            .cmp(&b.sample_offset)
+            .then_with(|| a.sort_priority().cmp(&b.sort_priority()))
+    });
     events
 }
 
@@ -284,5 +358,49 @@ mod tests {
         assert!(b1.is_empty());
         assert_eq!(b3.iter().filter(|e| is_on(e)).count(), 0);
         assert_eq!(b3.iter().filter(|e| is_off(e)).count(), 1);
+    }
+
+    #[test]
+    fn midi_panic_emits_all_channels() {
+        let track = TrackId::new();
+        let events = midi_panic_events(track);
+        assert_eq!(events.len(), 32);
+        assert!(events.iter().all(|(t, _)| *t == track));
+        assert!(
+            events
+                .iter()
+                .any(|(_, e)| e.status == 0xB0 && e.data1 == 123)
+        );
+        assert!(
+            events
+                .iter()
+                .any(|(_, e)| e.status == 0xBF && e.data1 == 120)
+        );
+    }
+
+    #[test]
+    fn sort_priority_puts_panic_before_note_on() {
+        let on = ScheduledMidiEvent::note_on(0, 60, 100, 0);
+        let off = ScheduledMidiEvent::note_off(0, 60, 0);
+        let panic = ScheduledMidiEvent::all_notes_off(0, 0);
+        assert!(panic.sort_priority() < off.sort_priority());
+        assert!(off.sort_priority() < on.sort_priority());
+    }
+
+    #[test]
+    fn notes_held_at_detects_sounding_note() {
+        let track = TrackId::new();
+        let mut clip = Clip::new_midi(track, "Clip", 0.0, 8.0);
+        clip.notes_mut()
+            .unwrap()
+            .push(MidiNote::new(60, 100, 0.0, 2.0));
+        let tempo = TempoMap::default();
+        // Mid-note (1 beat in): held.
+        let mid = tempo.beat_to_sample(BeatPos(1.0));
+        let held = notes_held_at(&[clip.clone()], track, &tempo, mid);
+        assert_eq!(held, vec![(60, 0)]);
+        // After note end: not held.
+        let after = tempo.beat_to_sample(BeatPos(3.0));
+        assert!(notes_held_at(&[clip], track, &tempo, after).is_empty());
     }
 }

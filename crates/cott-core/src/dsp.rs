@@ -520,7 +520,11 @@ fn collect_midi_for_instrument(
             events.push(*ev);
         }
     }
-    events.sort_by_key(|e| e.sample_offset);
+    events.sort_by(|a, b| {
+        a.sample_offset
+            .cmp(&b.sample_offset)
+            .then_with(|| a.sort_priority().cmp(&b.sort_priority()))
+    });
     events
 }
 

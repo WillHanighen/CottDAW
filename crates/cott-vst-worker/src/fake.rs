@@ -136,12 +136,17 @@ impl FakePlugin {
         if self.is_instrument {
             for ev in &midi {
                 let offset = ev.sample_offset as usize;
-                if ev.status & 0xf0 == 0x90 && ev.data2 > 0 {
+                let status = ev.status & 0xf0;
+                if status == 0xb0 && (ev.data1 == 120 || ev.data1 == 123) {
+                    // All Sound Off / All Notes Off — silence immediately.
+                    self.amp = 0.0;
+                    let _ = offset;
+                } else if status == 0x90 && ev.data2 > 0 {
                     self.freq = 440.0 * 2f32.powf((ev.data1 as f32 - 69.0) / 12.0);
                     self.amp = (ev.data2 as f32 / 127.0) * self.gain * 0.25;
                     // Apply from offset by rendering whole block with current amp — MVP.
                     let _ = offset;
-                } else if ev.status & 0xf0 == 0x80 || (ev.status & 0xf0 == 0x90 && ev.data2 == 0) {
+                } else if status == 0x80 || (status == 0x90 && ev.data2 == 0) {
                     self.amp = 0.0;
                 }
             }
