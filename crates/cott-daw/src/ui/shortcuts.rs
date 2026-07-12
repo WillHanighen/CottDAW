@@ -63,7 +63,7 @@ pub fn handle(app: &mut CottApp, ctx: &Context) {
         Some(ShortcutAction::Redo) => app.redo(),
         Some(ShortcutAction::Save) => app.save_project(),
         Some(ShortcutAction::Open) => app.load_project(),
-        Some(ShortcutAction::Export) => app.export_mix(),
+        Some(ShortcutAction::Export) => app.open_export_dialog(),
         Some(ShortcutAction::DeleteSelection) => {
             if app.ui.lower_tab == LowerTab::Graph {
                 app.remove_selected_graph_node();

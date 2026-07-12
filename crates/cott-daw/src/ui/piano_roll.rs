@@ -158,31 +158,35 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
             );
         }
 
-        let primary_pressed = ui.input(|i| i.pointer.primary_pressed());
-        let primary_down = ui.input(|i| i.pointer.primary_down());
-        let primary_released = ui.input(|i| i.pointer.primary_released());
-        let pointer = ui.input(|i| i.pointer.interact_pos());
-
-        if primary_pressed {
-            if let Some(pos) = pointer {
-                // Piano keys: audition only
-                if pos.x < grid.left() && pos.x >= rect.left() && grid.y_range().contains(pos.y) {
-                    if let Some(pitch) = pitch_at_y(grid, pos.y) {
-                        app.preview_note(track_id, pitch);
+        // Use the canvas Response — not global pointer state — so overlays
+        // (export modal, arrangement track strip, etc.) own their clicks.
+        // Prefer is_pointer_button_down_on over drag_started: click_and_drag
+        // delays drag_started until the pointer moves.
+        if resp.is_pointer_button_down_on() {
+            if ui.input(|i| i.pointer.primary_pressed()) {
+                if let Some(pos) = resp.interact_pointer_pos() {
+                    // Piano keys: audition only
+                    if pos.x < grid.left()
+                        && pos.x >= rect.left()
+                        && grid.y_range().contains(pos.y)
+                    {
+                        if let Some(pitch) = pitch_at_y(grid, pos.y) {
+                            app.preview_note(track_id, pitch);
+                        }
+                    } else if grid.contains(pos) {
+                        start_drag(app, clip_id, &notes, &grid, pos, track_id);
                     }
-                } else if grid.contains(pos) {
-                    start_drag(app, clip_id, &notes, &grid, pos, track_id);
+                }
+            }
+
+            if app.ui.piano_drag.is_some() {
+                if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
+                    update_drag(app, &grid, pos, track_id, view_beats);
                 }
             }
         }
 
-        if primary_down {
-            if let Some(pos) = pointer {
-                update_drag(app, &grid, pos, track_id, view_beats);
-            }
-        }
-
-        if primary_released && app.ui.piano_drag.is_some() {
+        if ui.input(|i| i.pointer.primary_released()) && app.ui.piano_drag.is_some() {
             commit_drag(app);
         }
 

@@ -11,6 +11,7 @@ pub mod ids;
 pub mod import;
 pub mod project;
 pub mod time;
+pub mod visualizers;
 
 pub use ids::*;
 pub use project::Project;

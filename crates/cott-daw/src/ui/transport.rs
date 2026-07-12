@@ -126,7 +126,7 @@ pub fn draw_top_bar(app: &mut CottApp, ctx: &egui::Context) {
                 .on_hover_text("Export (Ctrl+E)")
                 .clicked()
             {
-                app.export_mix();
+                app.open_export_dialog();
             }
             ui.separator();
             if ui.button("+ MIDI Track").clicked() {

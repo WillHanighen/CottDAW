@@ -7,7 +7,9 @@ use cott_core::clips::{MidiNote, TrackKind};
 use cott_core::commands::{Command, CommandStack};
 use cott_core::dsp::SampleCache;
 use cott_core::engine::{EngineCommand, push_project_snapshot};
-use cott_core::export::{ExportOptions, export_opus, write_wav_file};
+use cott_core::export::{
+    ExportFormat, ExportOptions, export_gonio_mp4, export_opus, write_wav_file,
+};
 use cott_core::graph::NodeKind;
 use cott_core::ids::{ClipId, NodeId, PluginInstanceId, TrackId};
 use cott_core::import::{
@@ -724,20 +726,44 @@ impl CottApp {
         self.remove_graph_node(node_id);
     }
 
-    pub fn export_mix(&mut self) {
+    pub fn open_export_dialog(&mut self) {
         if self.export_rx.is_some() {
             self.status = "Export already running…".into();
             return;
         }
+        self.ui.show_export_dialog = true;
+    }
+
+    pub fn is_exporting(&self) -> bool {
+        self.export_rx.is_some()
+    }
+
+    /// After the settings window: pick destination, then start the bounce.
+    pub fn confirm_export(&mut self) {
+        if self.export_rx.is_some() {
+            self.status = "Export already running…".into();
+            return;
+        }
+        let format = self.ui.export_dialog.format;
         let Some(path) = rfd::FileDialog::new()
-            .add_filter("Ogg Opus", &["opus"])
-            .add_filter("WAV", &["wav"])
-            .set_file_name("mixdown.opus")
+            .add_filter(format.filter_name(), &[format.extension()])
+            .set_file_name(format.default_file_name())
             .save_file()
         else {
+            // Re-open settings if the user cancels the save dialog.
+            self.ui.show_export_dialog = true;
             return;
         };
-        let opts = ExportOptions::default();
+
+        let mut opts = ExportOptions {
+            format,
+            bitrate_bps: self.ui.export_dialog.bitrate_bps,
+            tail_beats: self.ui.export_dialog.tail_beats,
+            gonio: self.ui.export_dialog.gonio.clone(),
+            ..Default::default()
+        };
+        opts.gonio = opts.gonio.clamp();
+
         let project = self.project.clone();
         let sample_cache = Arc::clone(&self.sample_cache);
         let plugin_host = Arc::clone(&self.plugin_host);
@@ -748,16 +774,23 @@ impl CottApp {
             .name("cott-export".into())
             .spawn(move || {
                 let mut live = crate::plugins::HostPluginAudio { inner: plugin_host };
-                let result = if path.extension().and_then(|e| e.to_str()) == Some("wav") {
-                    let buf = cott_core::export::render_project_stereo(
-                        &project,
-                        &sample_cache,
-                        &mut live,
-                        &opts,
-                    );
-                    write_wav_file(&buf, project.tempo.sample_rate, &path).map(|_| path)
-                } else {
-                    export_opus(&project, &sample_cache, &mut live, &path, &opts).map(|_| path)
+                let result = match opts.format {
+                    ExportFormat::Wav => {
+                        let buf = cott_core::export::render_project_stereo(
+                            &project,
+                            &sample_cache,
+                            &mut live,
+                            &opts,
+                        );
+                        write_wav_file(&buf, project.tempo.sample_rate, &path).map(|_| path)
+                    }
+                    ExportFormat::Opus => {
+                        export_opus(&project, &sample_cache, &mut live, &path, &opts).map(|_| path)
+                    }
+                    ExportFormat::GonioMp4 => {
+                        export_gonio_mp4(&project, &sample_cache, &mut live, &path, &opts)
+                            .map(|_| path)
+                    }
                 }
                 .map_err(|e| format!("{e:#}"));
                 let _ = tx.send(result);

@@ -1,10 +1,13 @@
 //! Ableton-style editor UI.
 
 mod arrangement;
+mod export_dialog;
 mod graph_editor;
 mod piano_roll;
 mod shortcuts;
 mod transport;
+
+pub use export_dialog::ExportDialogState;
 
 use crate::app::CottApp;
 use cott_core::clips::MidiNote;
@@ -87,6 +90,9 @@ pub struct UiState {
     /// Last pitch auditioned from the piano roll (avoid retrigger spam).
     pub piano_preview_pitch: Option<u8>,
     pub clip_drag: Option<ArrangementClipDrag>,
+    /// Export settings window (path chosen after confirm).
+    pub show_export_dialog: bool,
+    pub export_dialog: ExportDialogState,
 }
 
 impl Default for UiState {
@@ -109,6 +115,8 @@ impl Default for UiState {
             piano_drag: None,
             piano_preview_pitch: None,
             clip_drag: None,
+            show_export_dialog: false,
+            export_dialog: ExportDialogState::default(),
         }
     }
 }
@@ -116,6 +124,7 @@ impl Default for UiState {
 pub fn draw(app: &mut CottApp, ctx: &egui::Context) {
     shortcuts::handle(app, ctx);
     transport::draw_top_bar(app, ctx);
+    export_dialog::draw(app, ctx);
 
     // Outermost bottom panel first so the status bar stays pinned to the screen edge.
     egui::TopBottomPanel::bottom("status")
