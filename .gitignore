@@ -1,0 +1,10 @@
+/target
+**/*.rs.bk
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+*.cottproj.bak
+autosave/
+*.log

@@ -1,0 +1,32 @@
+[package]
+name = "cott-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Core project model, graph compiler, and DSP for CottDAW"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+slotmap = { workspace = true }
+petgraph = { workspace = true }
+rtrb = { workspace = true }
+midly = { workspace = true }
+symphonia = { workspace = true }
+rubato = { workspace = true }
+parking_lot = { workspace = true }
+crossbeam-channel = { workspace = true }
+bytemuck = { workspace = true }
+smallvec = { workspace = true }
+indexmap = { workspace = true }
+bitflags = { workspace = true }
+tempfile = { workspace = true }
+cott-ipc = { workspace = true }
+hound = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

@@ -1,0 +1,27 @@
+[package]
+name = "cott-vst-worker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Per-plugin sandboxed VST3 worker for CottDAW"
+
+[[bin]]
+name = "cott-vst-worker"
+path = "src/main.rs"
+
+[dependencies]
+cott-ipc = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde = { workspace = true }
+bincode = { workspace = true }
+nix = { workspace = true }
+uuid = { workspace = true }
+truce-rack-core = { workspace = true }
+truce-rack-vst3 = { workspace = true }
+parking_lot = { workspace = true }
+libloading = "0.8"
+vst3 = "0.3"
+tempfile = { workspace = true }
+x11-dl = { workspace = true }

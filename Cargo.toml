@@ -1,0 +1,59 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/cott-core",
+    "crates/cott-ipc",
+    "crates/cott-daw",
+    "crates/cott-vst-worker",
+]
+default-members = ["crates/cott-daw"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["Cottage End"]
+
+[workspace.dependencies]
+cott-core = { path = "crates/cott-core" }
+cott-ipc = { path = "crates/cott-ipc" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+thiserror = "2"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+slotmap = { version = "1", features = ["serde"] }
+petgraph = "0.7"
+rtrb = "0.3"
+midly = "0.5"
+symphonia = { version = "0.5", features = ["mp3", "flac", "wav", "ogg", "aac", "isomp4"] }
+rubato = "0.16"
+cpal = { version = "0.18", features = ["pipewire"] }
+eframe = { version = "0.31", default-features = false, features = ["default_fonts", "glow", "x11"] }
+egui = "0.31"
+rfd = "0.15"
+hound = "3.5"
+parking_lot = "0.12"
+crossbeam-channel = "0.5"
+nix = { version = "0.29", features = ["event", "fs", "mman", "socket", "uio", "process", "signal"] }
+bincode = "1"
+bytemuck = { version = "1", features = ["derive"] }
+truce-rack-core = "1.1"
+truce-rack-vst3 = "1.1"
+tempfile = "3"
+directories = "6"
+x11-dl = "2.21"
+bitflags = { version = "2", features = ["serde"] }
+smallvec = { version = "1", features = ["serde"] }
+indexmap = { version = "2", features = ["serde"] }
+
+# Call Linux VST3 ModuleEntry before GetPluginFactory (needed for yabridge).
+[patch.crates-io]
+truce-rack-vst3 = { path = "vendor/truce-rack-vst3" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

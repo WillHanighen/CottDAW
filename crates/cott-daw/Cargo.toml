@@ -1,0 +1,32 @@
+[package]
+name = "cott-daw"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "CottDAW — Linux Ableton-style DAW with sandboxed VST3"
+
+[[bin]]
+name = "cott-daw"
+path = "src/main.rs"
+
+[dependencies]
+cott-core = { workspace = true }
+cott-ipc = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+eframe = { workspace = true }
+egui = { workspace = true }
+rfd = { workspace = true }
+cpal = { workspace = true }
+rtrb = { workspace = true }
+parking_lot = { workspace = true }
+crossbeam-channel = { workspace = true }
+directories = { workspace = true }
+indexmap = { workspace = true }
+nix = { workspace = true }
+tempfile = { workspace = true }
+midly = { workspace = true }
