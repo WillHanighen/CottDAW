@@ -63,6 +63,12 @@ pub enum Command {
         before: MidiNote,
         after: MidiNote,
     },
+    /// Edit a group of notes as one undoable operation (multi-note drag).
+    EditNotes {
+        clip_id: ClipId,
+        before: Vec<MidiNote>,
+        after: Vec<MidiNote>,
+    },
     SetGainPan {
         node_id: NodeId,
         old_gain: f32,
@@ -348,6 +354,22 @@ fn apply(project: &mut Project, cmd: &Command, reverse: bool) {
                 }
             }
         }
+        Command::EditNotes {
+            clip_id,
+            before,
+            after,
+        } => {
+            if let Some(clip) = project.clips.iter_mut().find(|c| c.id == *clip_id) {
+                if let Some(notes) = clip.notes_mut() {
+                    let source = if reverse { before } else { after };
+                    for edited in source {
+                        if let Some(n) = notes.iter_mut().find(|n| n.id == edited.id) {
+                            *n = edited.clone();
+                        }
+                    }
+                }
+            }
+        }
         Command::SetGainPan {
             node_id,
             old_gain,
@@ -602,6 +624,49 @@ mod tests {
         assert_eq!(project.clips[0].notes().unwrap().len(), 3);
         assert!(stack.redo(&mut project));
         assert!(project.clips[0].notes().unwrap().is_empty());
+    }
+
+    #[test]
+    fn edit_notes_undo_as_one_command() {
+        let mut project = Project::new("t");
+        let track = project.add_midi_track("A");
+        let clip = Clip::new_midi(track, "C", 0.0, 4.0);
+        let clip_id = clip.id;
+        project.clips.push(clip);
+        let before = [60, 64]
+            .map(|pitch| MidiNote::new(pitch, 100, 0.0, 1.0))
+            .to_vec();
+        let after: Vec<_> = before
+            .iter()
+            .map(|n| MidiNote {
+                pitch: n.pitch + 2,
+                start_beats: n.start_beats + 1.0,
+                ..n.clone()
+            })
+            .collect();
+        let mut stack = CommandStack::default();
+        stack.push(
+            &mut project,
+            Command::AddNotes {
+                clip_id,
+                notes: before.clone(),
+            },
+        );
+        stack.push(
+            &mut project,
+            Command::EditNotes {
+                clip_id,
+                before: before.clone(),
+                after: after.clone(),
+            },
+        );
+        let notes = project.clips[0].notes().unwrap();
+        assert_eq!(notes[0].pitch, 62);
+        assert!((notes[0].start_beats - 1.0).abs() < 1e-9);
+        assert!(stack.undo(&mut project));
+        let notes = project.clips[0].notes().unwrap();
+        assert_eq!(notes[0].pitch, 60);
+        assert!(notes[0].start_beats.abs() < 1e-9);
     }
 
     #[test]

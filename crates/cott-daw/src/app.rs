@@ -1325,18 +1325,22 @@ impl CottApp {
     }
 
     /// Add several simultaneous notes as one undoable operation.
+    /// Replaces the note selection with the newly stamped notes.
     pub fn add_notes_at(&mut self, clip_id: ClipId, pitches: &[u8], start_beats: f64, length: f64) {
         let Some((&preview_pitch, _)) = pitches.split_first() else {
             return;
         };
         self.ensure_clip_length(clip_id, start_beats + length);
-        let notes = pitches
+        let notes: Vec<MidiNote> = pitches
             .iter()
             .copied()
             .map(|pitch| MidiNote::new(pitch, 100, start_beats, length))
             .collect();
+        let ids: Vec<_> = notes.iter().map(|n| n.id).collect();
         self.commands
             .push(&mut self.project, Command::AddNotes { clip_id, notes });
+        self.ui.selected_notes = ids;
+        self.ui.selected_notes_clip = Some(clip_id);
         self.sync_engine();
         if let Some(track_id) = self
             .project
@@ -1489,6 +1493,55 @@ impl CottApp {
             .map(|c| c.track_id)
         {
             self.preview_note(track_id, after.pitch);
+        }
+    }
+
+    /// Apply several note edits as one undoable step (multi-note drag).
+    pub fn edit_notes(&mut self, clip_id: ClipId, before: Vec<MidiNote>, after: Vec<MidiNote>) {
+        if before.is_empty() || before.len() != after.len() {
+            return;
+        }
+        if before.iter().zip(after.iter()).all(|(b, a)| {
+            b.pitch == a.pitch
+                && b.start_beats == a.start_beats
+                && b.length_beats == a.length_beats
+                && b.velocity == a.velocity
+                && b.channel == a.channel
+        }) {
+            return;
+        }
+        if let Some(end) = after
+            .iter()
+            .map(|n| n.start_beats + n.length_beats)
+            .fold(None, |acc: Option<f64>, e| {
+                Some(acc.map_or(e, |m| m.max(e)))
+            })
+        {
+            self.ensure_clip_length(clip_id, end);
+        }
+        let preview_pitch = after
+            .iter()
+            .find(|a| before.iter().any(|b| b.id == a.id && b.pitch != a.pitch))
+            .map(|n| n.pitch);
+        self.commands.push(
+            &mut self.project,
+            Command::EditNotes {
+                clip_id,
+                before,
+                after,
+            },
+        );
+        self.shrink_clip_to_notes(clip_id);
+        self.sync_engine();
+        if let (Some(pitch), Some(track_id)) = (
+            preview_pitch,
+            self.project
+                .clips
+                .iter()
+                .find(|c| c.id == clip_id)
+                .map(|c| c.track_id),
+        ) {
+            self.preview_note(track_id, pitch);
         }
     }
 

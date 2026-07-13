@@ -134,7 +134,7 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
             pending_zoom_pct = Some(100);
         }
         ui.weak(
-            "LMB: draw/move/resize · Ctrl+LMB: multi-select · Shift+drag: lasso · RMB: delete · Shift+scroll: zoom",
+            "LMB: draw/move/resize · Ctrl+LMB: multi-select · Shift+drag: lasso · Esc: cancel/deselect · RMB: delete · Shift+scroll: zoom",
         );
     });
 
@@ -343,15 +343,14 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
             );
         }
 
-        let drag_note_id = match &app.ui.piano_drag {
-            Some(PianoNoteDrag::Move { note_id, .. } | PianoNoteDrag::Resize { note_id, .. }) => {
-                Some(*note_id)
-            }
-            _ => None,
+        let drag_note_ids: Vec<NoteId> = match &app.ui.piano_drag {
+            Some(PianoNoteDrag::Move { before, .. }) => before.iter().map(|n| n.id).collect(),
+            Some(PianoNoteDrag::Resize { note_id, .. }) => vec![*note_id],
+            _ => Vec::new(),
         };
 
         for note in &notes {
-            if drag_note_id == Some(note.id) {
+            if drag_note_ids.contains(&note.id) {
                 continue; // drawn from live drag state below
             }
             let selected = app.ui.selected_notes.contains(&note.id);
@@ -375,7 +374,7 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
                 note_color(scale, ghost.pitch, true),
                 key_h,
                 beat_w,
-                false,
+                app.ui.selected_notes.contains(&ghost.id),
             );
         }
 
@@ -540,11 +539,11 @@ fn scale_toolbar(app: &mut CottApp, ui: &mut egui::Ui, clip_id: cott_core::ids::
 
         ui.separator();
         ui.checkbox(&mut app.ui.chord_stamp_enabled, "Chord stamp")
-            .on_hover_text("Draw every note of the selected chord in the clicked octave");
+            .on_hover_text("Draw every note of the selected chord from the clicked pitch");
         ui.add_enabled_ui(app.ui.chord_stamp_enabled, |ui| {
             egui::ComboBox::from_id_salt("chord_stamp_kind")
                 .selected_text(app.ui.chord_kind.name())
-                .width(110.0)
+                .width(130.0)
                 .show_ui(ui, |ui| {
                     for kind in ChordKind::ALL {
                         ui.selectable_value(&mut app.ui.chord_kind, kind, kind.name());
@@ -789,14 +788,24 @@ fn start_drag(
             app.ui.selected_notes_clip = Some(clip_id);
         }
 
+        let before: Vec<MidiNote> = notes
+            .iter()
+            .filter(|n| app.ui.selected_notes.contains(&n.id))
+            .cloned()
+            .collect();
+        let before = if before.iter().any(|n| n.id == note.id) {
+            before
+        } else {
+            vec![note.clone()]
+        };
+
         let beat = beat_at_x(*grid, pos.x, beat_w);
         app.ui.piano_drag = Some(PianoNoteDrag::Move {
             clip_id,
             note_id: note.id,
-            before: note.clone(),
+            before,
             pitch: note.pitch,
             start_beats: note.start_beats,
-            length_beats: note.length_beats,
             grab_offset_beats: beat - note.start_beats,
         });
         app.preview_note(track_id, note.pitch);
@@ -862,22 +871,37 @@ fn update_drag(
             }
         }
         PianoNoteDrag::Move {
+            note_id,
+            before,
             pitch,
             start_beats,
-            length_beats,
             grab_offset_beats,
             ..
         } => {
+            let Some(grabbed) = before.iter().find(|n| n.id == *note_id) else {
+                return;
+            };
+            let grabbed_pitch = grabbed.pitch;
+            let grabbed_start = grabbed.start_beats;
+            let mut new_pitch = *pitch;
             if let Some(p) = pitch_at_y(*grid, pos.y, key_h) {
-                if *pitch != p {
-                    *pitch = p;
-                    preview_pitch = Some(p);
-                }
+                new_pitch = p;
             }
             let beat = beat_at_x(*grid, pos.x, beat_w) - *grab_offset_beats;
-            let q = quantize_floor(beat).max(0.0);
-            let max_start = (clip_length - *length_beats).max(0.0);
-            *start_beats = q.min(max_start);
+            let new_start = quantize_floor(beat).max(0.0);
+            let (pitch_delta, start_delta) = clamp_move_deltas(
+                before,
+                new_pitch as i16 - grabbed_pitch as i16,
+                new_start - grabbed_start,
+                clip_length,
+            );
+            let clamped_pitch = (grabbed_pitch as i16 + pitch_delta) as u8;
+            let clamped_start = grabbed_start + start_delta;
+            if *pitch != clamped_pitch {
+                preview_pitch = Some(clamped_pitch);
+            }
+            *pitch = clamped_pitch;
+            *start_beats = clamped_start;
         }
         PianoNoteDrag::Resize {
             start_beats,
@@ -924,19 +948,19 @@ fn drag_ghosts(drag: &Option<PianoNoteDrag>) -> Vec<MidiNote> {
                 .collect()
         }
         Some(PianoNoteDrag::Move {
+            note_id,
             before,
             pitch,
             start_beats,
-            length_beats,
             ..
-        }) => vec![MidiNote {
-            id: before.id,
-            pitch: *pitch,
-            velocity: before.velocity,
-            start_beats: *start_beats,
-            length_beats: *length_beats,
-            channel: before.channel,
-        }],
+        }) => {
+            let Some(grabbed) = before.iter().find(|n| n.id == *note_id) else {
+                return Vec::new();
+            };
+            let pitch_delta = *pitch as i16 - grabbed.pitch as i16;
+            let start_delta = *start_beats - grabbed.start_beats;
+            notes_after_move(before, pitch_delta, start_delta)
+        }
         Some(PianoNoteDrag::Resize {
             before,
             start_beats,
@@ -954,14 +978,53 @@ fn drag_ghosts(drag: &Option<PianoNoteDrag>) -> Vec<MidiNote> {
     }
 }
 
-/// Build a chord around the clicked root while keeping every pitch in the
-/// root's current MIDI octave.
+/// Keep relative intervals: clamp pitch/start deltas so every note stays valid.
+fn clamp_move_deltas(
+    before: &[MidiNote],
+    mut pitch_delta: i16,
+    mut start_delta: f64,
+    clip_length: f64,
+) -> (i16, f64) {
+    for note in before {
+        pitch_delta = pitch_delta.max(-(note.pitch as i16));
+        pitch_delta = pitch_delta.min(127 - note.pitch as i16);
+    }
+    if let Some(min_start) = before
+        .iter()
+        .map(|n| n.start_beats)
+        .reduce(f64::min)
+    {
+        start_delta = start_delta.max(-min_start);
+    }
+    if let Some(max_delta) = before
+        .iter()
+        .map(|n| (clip_length - n.length_beats).max(0.0) - n.start_beats)
+        .reduce(f64::min)
+    {
+        start_delta = start_delta.min(max_delta);
+    }
+    (pitch_delta, start_delta)
+}
+
+fn notes_after_move(before: &[MidiNote], pitch_delta: i16, start_delta: f64) -> Vec<MidiNote> {
+    before
+        .iter()
+        .map(|note| MidiNote {
+            id: note.id,
+            pitch: (note.pitch as i16 + pitch_delta).clamp(0, 127) as u8,
+            velocity: note.velocity,
+            start_beats: (note.start_beats + start_delta).max(0.0),
+            length_beats: note.length_beats,
+            channel: note.channel,
+        })
+        .collect()
+}
+
+/// Build a chord by stacking intervals above the clicked root pitch.
 fn chord_pitches(root: u8, kind: ChordKind) -> Vec<u8> {
-    let octave_start = (root / 12) * 12;
-    let root_class = root % 12;
     kind.intervals()
         .iter()
-        .map(|interval| octave_start + (root_class + interval) % 12)
+        .map(|interval| root.saturating_add(*interval).min(127))
         .collect()
 }
 
@@ -990,22 +1053,32 @@ fn commit_drag(app: &mut CottApp, notes: &[MidiNote], grid: &egui::Rect, key_h: 
         }
         PianoNoteDrag::Move {
             clip_id,
+            note_id,
             before,
             pitch,
             start_beats,
-            length_beats,
             ..
         } => {
-            app.ensure_clip_length(clip_id, start_beats + length_beats);
-            let after = MidiNote {
-                id: before.id,
-                pitch,
-                velocity: before.velocity,
-                start_beats,
-                length_beats,
-                channel: before.channel,
+            let Some(grabbed) = before.iter().find(|n| n.id == note_id).cloned() else {
+                return;
             };
-            app.edit_note(clip_id, before, after);
+            let pitch_delta = pitch as i16 - grabbed.pitch as i16;
+            let start_delta = start_beats - grabbed.start_beats;
+            let after = notes_after_move(&before, pitch_delta, start_delta);
+            if let Some(end) = after
+                .iter()
+                .map(|n| n.start_beats + n.length_beats)
+                .reduce(f64::max)
+            {
+                app.ensure_clip_length(clip_id, end);
+            }
+            if after.len() == 1 {
+                if let (Some(b), Some(a)) = (before.into_iter().next(), after.into_iter().next()) {
+                    app.edit_note(clip_id, b, a);
+                }
+            } else {
+                app.edit_notes(clip_id, before, after);
+            }
         }
         PianoNoteDrag::Resize {
             clip_id,
@@ -1047,12 +1120,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn chord_stamp_keeps_notes_in_clicked_octave() {
-        assert_eq!(chord_pitches(71, ChordKind::Major), vec![71, 63, 66]);
-        assert!(
-            chord_pitches(71, ChordKind::Dominant7)
-                .iter()
-                .all(|pitch| pitch / 12 == 5)
+    fn chord_stamp_stacks_intervals_from_root() {
+        assert_eq!(chord_pitches(71, ChordKind::Major), vec![71, 75, 78]);
+        assert_eq!(
+            chord_pitches(71, ChordKind::Dominant7),
+            vec![71, 75, 78, 81]
         );
     }
 
@@ -1060,6 +1132,40 @@ mod tests {
     fn chord_stamp_uses_selected_chord_intervals() {
         assert_eq!(chord_pitches(60, ChordKind::Minor), vec![60, 63, 67]);
         assert_eq!(chord_pitches(60, ChordKind::Major7), vec![60, 64, 67, 71]);
+        assert_eq!(chord_pitches(60, ChordKind::Diminished7), vec![60, 63, 66, 69]);
+        assert_eq!(
+            chord_pitches(60, ChordKind::HalfDiminished),
+            vec![60, 63, 66, 70]
+        );
+        assert_eq!(chord_pitches(60, ChordKind::Major9), vec![60, 64, 67, 71, 74]);
+        assert_eq!(chord_pitches(60, ChordKind::Add9), vec![60, 64, 67, 74]);
+        assert_eq!(chord_pitches(60, ChordKind::Power), vec![60, 67]);
+    }
+
+    #[test]
+    fn multi_note_move_keeps_relative_offsets() {
+        let before = [
+            MidiNote::new(60, 100, 1.0, 0.5),
+            MidiNote::new(64, 100, 1.5, 0.5),
+        ];
+        let after = notes_after_move(&before, 2, 0.25);
+        assert_eq!(after[0].pitch, 62);
+        assert_eq!(after[1].pitch, 66);
+        assert!((after[0].start_beats - 1.25).abs() < 1e-9);
+        assert!((after[1].start_beats - 1.75).abs() < 1e-9);
+    }
+
+    #[test]
+    fn multi_note_move_clamps_group_to_midi_range() {
+        let before = [
+            MidiNote::new(126, 100, 0.0, 0.5),
+            MidiNote::new(120, 100, 0.0, 0.5),
+        ];
+        let (pitch_delta, _) = clamp_move_deltas(&before, 5, 0.0, 16.0);
+        assert_eq!(pitch_delta, 1); // 126+1=127, not +5
+        let after = notes_after_move(&before, pitch_delta, 0.0);
+        assert_eq!(after[0].pitch, 127);
+        assert_eq!(after[1].pitch, 121);
     }
 
     #[test]

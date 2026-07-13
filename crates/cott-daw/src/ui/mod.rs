@@ -29,53 +29,98 @@ pub enum ChordKind {
     #[default]
     Major,
     Minor,
+    Power,
     Diminished,
     Augmented,
     Suspended2,
     Suspended4,
+    Major6,
+    Minor6,
     Major7,
     Minor7,
     Dominant7,
+    Diminished7,
+    HalfDiminished,
+    MinorMajor7,
+    Dominant7Sus4,
+    Add9,
+    Major9,
+    Minor9,
+    Dominant9,
 }
 
 impl ChordKind {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 20] = [
         Self::Major,
         Self::Minor,
+        Self::Power,
         Self::Diminished,
         Self::Augmented,
         Self::Suspended2,
         Self::Suspended4,
+        Self::Major6,
+        Self::Minor6,
         Self::Major7,
         Self::Minor7,
         Self::Dominant7,
+        Self::Diminished7,
+        Self::HalfDiminished,
+        Self::MinorMajor7,
+        Self::Dominant7Sus4,
+        Self::Add9,
+        Self::Major9,
+        Self::Minor9,
+        Self::Dominant9,
     ];
 
     pub fn name(self) -> &'static str {
         match self {
             Self::Major => "Major",
             Self::Minor => "Minor",
+            Self::Power => "Power",
             Self::Diminished => "Diminished",
             Self::Augmented => "Augmented",
             Self::Suspended2 => "Suspended 2",
             Self::Suspended4 => "Suspended 4",
+            Self::Major6 => "Major 6",
+            Self::Minor6 => "Minor 6",
             Self::Major7 => "Major 7",
             Self::Minor7 => "Minor 7",
             Self::Dominant7 => "Dominant 7",
+            Self::Diminished7 => "Diminished 7",
+            Self::HalfDiminished => "Half-diminished",
+            Self::MinorMajor7 => "Minor-major 7",
+            Self::Dominant7Sus4 => "7sus4",
+            Self::Add9 => "Add 9",
+            Self::Major9 => "Major 9",
+            Self::Minor9 => "Minor 9",
+            Self::Dominant9 => "Dominant 9",
         }
     }
 
+    /// Chord tones as semitone offsets from the root.
     pub fn intervals(self) -> &'static [u8] {
         match self {
             Self::Major => &[0, 4, 7],
             Self::Minor => &[0, 3, 7],
+            Self::Power => &[0, 7],
             Self::Diminished => &[0, 3, 6],
             Self::Augmented => &[0, 4, 8],
             Self::Suspended2 => &[0, 2, 7],
             Self::Suspended4 => &[0, 5, 7],
+            Self::Major6 => &[0, 4, 7, 9],
+            Self::Minor6 => &[0, 3, 7, 9],
             Self::Major7 => &[0, 4, 7, 11],
             Self::Minor7 => &[0, 3, 7, 10],
             Self::Dominant7 => &[0, 4, 7, 10],
+            Self::Diminished7 => &[0, 3, 6, 9],
+            Self::HalfDiminished => &[0, 3, 6, 10],
+            Self::MinorMajor7 => &[0, 3, 7, 11],
+            Self::Dominant7Sus4 => &[0, 5, 7, 10],
+            Self::Add9 => &[0, 4, 7, 14],
+            Self::Major9 => &[0, 4, 7, 11, 14],
+            Self::Minor9 => &[0, 3, 7, 10, 14],
+            Self::Dominant9 => &[0, 4, 7, 10, 14],
         }
     }
 }
@@ -91,14 +136,17 @@ pub enum PianoNoteDrag {
         end_beat: f64,
         chord: Option<ChordKind>,
     },
-    /// Drag note body to move pitch/start.
+    /// Drag note body to move pitch/start (moves the whole selection).
     Move {
         clip_id: ClipId,
+        /// Note under the pointer — drives grab offset and live pitch/start.
         note_id: NoteId,
-        before: MidiNote,
+        /// Snapshots of every selected note at drag start (includes `note_id`).
+        before: Vec<MidiNote>,
+        /// Live pitch of the grabbed note.
         pitch: u8,
+        /// Live start of the grabbed note.
         start_beats: f64,
-        length_beats: f64,
         grab_offset_beats: f64,
     },
     /// Drag note right edge to change length.

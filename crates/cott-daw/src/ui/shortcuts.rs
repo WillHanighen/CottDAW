@@ -14,6 +14,7 @@ enum ShortcutAction {
     Open,
     Export,
     DeleteSelection,
+    Escape,
     Copy,
     Paste,
     Duplicate,
@@ -68,6 +69,8 @@ pub fn handle(app: &mut CottApp, ctx: &Context) {
             || consume_initial_key(input, Modifiers::NONE, Key::Backspace)
         {
             Some(ShortcutAction::DeleteSelection)
+        } else if consume_initial_key(input, Modifiers::NONE, Key::Escape) {
+            Some(ShortcutAction::Escape)
         } else {
             None
         }
@@ -144,6 +147,14 @@ pub fn handle(app: &mut CottApp, ctx: &Context) {
                 app.remove_selected_graph_node();
             } else if app.ui.selected_track.is_some() {
                 app.remove_selected_track();
+            }
+        }
+        Some(ShortcutAction::Escape) => {
+            // Cancel in-progress note draw/move/resize/lasso without committing.
+            if app.ui.piano_drag.is_some() {
+                app.ui.piano_drag = None;
+            } else if !app.ui.selected_notes.is_empty() {
+                app.clear_note_selection();
             }
         }
         None => {}

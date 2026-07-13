@@ -48,12 +48,13 @@ Default signal paths:
 
 1. Select a MIDI clip (or create one and switch to **Piano Roll**).
 2. **Left-click** to add, move, or resize notes (¼-beat quantize).
-3. **Ctrl+click** toggles notes in a multi-selection; **Shift+drag** on empty grid draws a lasso selection.
+3. **Ctrl+click** toggles notes in a multi-selection; **Shift+drag** on empty grid draws a lasso selection. Dragging any selected note moves the whole selection together. Chord stamp selects the notes it places (replacing any previous selection).
 4. **Ctrl+C / Ctrl+V** copy and paste selected notes; paste aligns the earliest note to the mouse (or the playhead).
 5. **Delete / Backspace** removes the selected notes (or the whole clip when no notes are selected).
-6. **Right-click** a note to remove it (or the whole selection if that note is selected).
-7. Double-click **Editing: …** to rename the clip.
-8. Click piano keys to audition pitches while stopped.
+6. **Escape** cancels an in-progress draw/move/resize/lasso, or clears the note selection.
+7. **Right-click** a note to remove it (or the whole selection if that note is selected).
+8. Double-click **Editing: …** to rename the clip.
+9. Click piano keys to audition pitches while stopped.
 
 Pitch range shown is roughly C2–C6. Editing notes can grow or shrink the clip length. Each MIDI clip stores its own scale guide in the project file.
 
@@ -164,6 +165,7 @@ Shortcuts are ignored while a text field has focus.
 | Ctrl+V | Paste notes/clip near the mouse (or playhead fallback) |
 | Ctrl+D | Duplicate selected clip |
 | Delete / Backspace | Delete selected notes, else selected clip / graph node / track |
+| Escape | Cancel piano-roll drag/draw, else deselect notes |
 
 ## Tips
 
