@@ -49,10 +49,7 @@ impl CottApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         configure_style(&cc.egui_ctx);
 
-        let use_fake = std::env::var("COTT_FAKE_PLUGINS").ok().as_deref() == Some("1")
-            || std::env::args().any(|a| a == "--fake-plugins");
-
-        let plugin_host = Arc::new(Mutex::new(PluginHost::new(use_fake)));
+        let plugin_host = Arc::new(Mutex::new(PluginHost::new()));
         // Prefer workspace target path for worker.
         if let Ok(exe) = std::env::current_exe() {
             let candidates = [
@@ -90,11 +87,7 @@ impl CottApp {
             audio,
             plugin_host,
             sample_cache: Arc::new(SampleCache::default()),
-            status: if use_fake {
-                "Ready (fake plugins)".into()
-            } else {
-                "Ready".into()
-            },
+            status: "Ready".into(),
             project_path: None,
             last_autosave: Instant::now(),
             meters: IndexMap::new(),
@@ -112,11 +105,10 @@ impl CottApp {
             self.status = "Plugin scan already running…".into();
             return;
         }
-        let (worker_bin, use_fake, blacklist) = {
+        let (worker_bin, blacklist) = {
             let host = self.plugin_host.lock();
             (
                 host.worker_bin().to_path_buf(),
-                host.use_fake(),
                 host.scan_blacklist().to_vec(),
             )
         };
@@ -126,7 +118,7 @@ impl CottApp {
         std::thread::Builder::new()
             .name("cott-plugin-scan".into())
             .spawn(move || {
-                let result = PluginHost::scan_catalog(&worker_bin, use_fake, &blacklist)
+                let result = PluginHost::scan_catalog(&worker_bin, &blacklist)
                     .map_err(|e| format!("{e:#}"));
                 let _ = tx.send(result);
             })

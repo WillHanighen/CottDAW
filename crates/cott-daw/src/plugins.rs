@@ -36,19 +36,17 @@ pub struct PluginInstance {
     shm: Option<SharedAudioRegion>,
     sock_path: PathBuf,
     shm_name: String,
-    fake: bool,
 }
 
 pub struct PluginHost {
     pub catalog: Vec<PluginDescriptor>,
     pub instances: IndexMap<PluginInstanceId, PluginInstance>,
     worker_bin: PathBuf,
-    use_fake: bool,
     scan_blacklist: Vec<String>,
 }
 
 impl PluginHost {
-    pub fn new(use_fake: bool) -> Self {
+    pub fn new() -> Self {
         let worker_bin = std::env::current_exe()
             .ok()
             .and_then(|p| p.parent().map(|d| d.join("cott-vst-worker")))
@@ -58,7 +56,6 @@ impl PluginHost {
             catalog: Vec::new(),
             instances: IndexMap::new(),
             worker_bin,
-            use_fake,
             scan_blacklist: Vec::new(),
         }
     }
@@ -71,17 +68,13 @@ impl PluginHost {
         &self.worker_bin
     }
 
-    pub fn use_fake(&self) -> bool {
-        self.use_fake
-    }
-
     pub fn scan_blacklist(&self) -> &[String] {
         &self.scan_blacklist
     }
 
     #[allow(dead_code)]
     pub fn scan(&mut self) -> Result<()> {
-        self.catalog = Self::scan_catalog(&self.worker_bin, self.use_fake, &self.scan_blacklist)?;
+        self.catalog = Self::scan_catalog(&self.worker_bin, &self.scan_blacklist)?;
         Ok(())
     }
 
@@ -89,7 +82,6 @@ impl PluginHost {
     /// Safe to call from a background thread.
     pub fn scan_catalog(
         worker_bin: &Path,
-        use_fake: bool,
         scan_blacklist: &[String],
     ) -> Result<Vec<PluginDescriptor>> {
         // Disposable scanner worker.
@@ -110,9 +102,6 @@ impl PluginHost {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped());
-        if use_fake {
-            cmd.arg("--fake");
-        }
         let mut child = cmd.spawn().with_context(|| {
             format!(
                 "spawn scanner worker at {} (build cott-vst-worker or set PATH)",
@@ -123,12 +112,12 @@ impl PluginHost {
         let (mut stream, _) = listener.accept()?;
         wait_hello(&mut stream)?;
 
-        let paths = if use_fake {
-            Vec::new()
-        } else {
-            standard_vst3_dirs()
-        };
-        send(&mut stream, &HostToWorker::ScanPaths { paths })?;
+        send(
+            &mut stream,
+            &HostToWorker::ScanPaths {
+                paths: standard_vst3_dirs(),
+            },
+        )?;
         // Yabridge plugins spawn Wine per bundle; allow a long budget.
         let msg = recv_timeout(&mut stream, Duration::from_secs(300))?;
         let catalog = match msg {
@@ -173,7 +162,6 @@ impl PluginHost {
         restrict_socket_permissions(&sock_path);
 
         let shm = SharedAudioRegion::create(&shm_name)?;
-        let fake = self.use_fake || uid.starts_with("fake.");
         let mut cmd = Command::new(&self.worker_bin);
         cmd.arg("--shm")
             .arg(&shm_name)
@@ -182,9 +170,6 @@ impl PluginHost {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped());
-        if fake {
-            cmd.arg("--fake");
-        }
         let mut child = cmd.spawn().context("spawn plugin worker")?;
         if let Some(stderr) = child.stderr.take() {
             std::thread::Builder::new()
@@ -244,7 +229,6 @@ impl PluginHost {
                 shm: Some(shm),
                 sock_path,
                 shm_name,
-                fake,
             },
         );
         Ok(())

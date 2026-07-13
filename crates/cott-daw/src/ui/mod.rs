@@ -302,7 +302,7 @@ fn draw_browser(app: &mut CottApp, ui: &mut egui::Ui) {
             }
         }
         if app.plugin_host.lock().catalog.is_empty() && !app.is_scanning_plugins() {
-            ui.weak("No plugins found. Start with --fake-plugins or install VST3s in ~/.vst3");
+            ui.weak("No plugins found. Install VST3s in ~/.vst3");
         }
     });
 }

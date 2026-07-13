@@ -177,7 +177,7 @@ impl AudioProcessor {
     /// transport stops, seeks, or loops mid-note. Real VST3 plugins also ignore
     /// CC 120/123 (truce-rack drops ControlChange), so we emit **real NoteOff**
     /// for every currently held arrangement/preview note, plus CC panic for
-    /// FakePlugin / workers that expand CC into note-offs.
+    /// workers that expand CC into note-offs.
     fn queue_midi_panic(&mut self) {
         self.pending_panic_midi.clear();
 
