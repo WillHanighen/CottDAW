@@ -8,8 +8,12 @@ const BEAT_EPSILON: f64 = 1e-9;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum AutomationTarget {
-    NodeGain { node_id: NodeId },
-    NodePan { node_id: NodeId },
+    NodeGain {
+        node_id: NodeId,
+    },
+    NodePan {
+        node_id: NodeId,
+    },
     PluginParam {
         instance_id: PluginInstanceId,
         param_id: u32,
@@ -52,8 +56,11 @@ impl AutomationLane {
             existing.value = value;
         } else {
             self.points.push(AutomationPoint { beat, value });
-            self.points
-                .sort_by(|a, b| a.beat.partial_cmp(&b.beat).unwrap_or(std::cmp::Ordering::Equal));
+            self.points.sort_by(|a, b| {
+                a.beat
+                    .partial_cmp(&b.beat)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
         }
     }
 

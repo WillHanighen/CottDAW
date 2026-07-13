@@ -216,16 +216,8 @@ pub fn write_gonio_mp4(
     gonio: &GonioOptions,
 ) -> Result<()> {
     let gonio = gonio.clone().clamp();
-    let left = stereo
-        .channels
-        .first()
-        .map(|c| c.as_slice())
-        .unwrap_or(&[]);
-    let right = stereo
-        .channels
-        .get(1)
-        .map(|c| c.as_slice())
-        .unwrap_or(left);
+    let left = stereo.channels.first().map(|c| c.as_slice()).unwrap_or(&[]);
+    let right = stereo.channels.get(1).map(|c| c.as_slice()).unwrap_or(left);
     let frames = left.len().min(right.len());
     if frames == 0 {
         return Err(anyhow!("nothing to export — mix is empty"));
@@ -235,9 +227,7 @@ pub fn write_gonio_mp4(
     let wav_path = tmp_dir.path().join("bounce.wav");
     write_wav_file(stereo, sample_rate, &wav_path)?;
 
-    let samples_per_frame = ((sample_rate as f64) / (gonio.fps as f64))
-        .round()
-        .max(1.0) as usize;
+    let samples_per_frame = ((sample_rate as f64) / (gonio.fps as f64)).round().max(1.0) as usize;
     let size = format!("{}x{}", gonio.width, gonio.height);
     let fps = gonio.fps.to_string();
     let crf = gonio.crf.to_string();

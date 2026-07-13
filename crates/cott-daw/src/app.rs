@@ -22,10 +22,11 @@ use cott_ipc::{PluginDescriptor, PluginFormat};
 use eframe::egui;
 use indexmap::IndexMap;
 use parking_lot::Mutex;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
+use tempfile::TempDir;
 use tracing::{error, info, warn};
 
 pub struct CottApp {
@@ -36,7 +37,10 @@ pub struct CottApp {
     pub plugin_host: Arc<Mutex<PluginHost>>,
     pub sample_cache: Arc<SampleCache>,
     pub status: String,
+    /// User-facing `.ctgdaw` path (None until first Save / after legacy import).
     pub project_path: Option<PathBuf>,
+    /// Temporary extracted workspace for live asset I/O.
+    workspace: Option<TempDir>,
     pub last_autosave: Instant,
     pub meters: IndexMap<NodeId, cott_core::dsp::MeterState>,
     /// Background VST scan result (UI must stay responsive while Wine loads).
@@ -89,6 +93,7 @@ impl CottApp {
             sample_cache: Arc::new(SampleCache::default()),
             status: "Ready".into(),
             project_path: None,
+            workspace: None,
             last_autosave: Instant::now(),
             meters: IndexMap::new(),
             plugin_scan_rx: None,
@@ -288,6 +293,9 @@ impl CottApp {
             return;
         }
         self.last_autosave = Instant::now();
+        if self.project.root_dir.is_none() {
+            return;
+        }
         let dir = directories::ProjectDirs::from("dev", "Cottage", "CottDAW")
             .map(|d| d.data_dir().join("autosave"));
         if let Some(dir) = dir {
@@ -298,17 +306,67 @@ impl CottApp {
         }
     }
 
+    fn ensure_live_workspace(&mut self) -> Result<(), String> {
+        if self.project.root_dir.is_some() {
+            return Ok(());
+        }
+        let workspace = TempDir::new().map_err(|e| format!("temp workspace: {e}"))?;
+        self.project
+            .ensure_workspace(workspace.path())
+            .map_err(|e| e.to_string())?;
+        self.workspace = Some(workspace);
+        Ok(())
+    }
+
+    fn adopt_project(
+        &mut self,
+        project: Project,
+        archive_path: Option<PathBuf>,
+        workspace: TempDir,
+    ) {
+        self.stop();
+        self.project = project;
+        self.project_path = archive_path;
+        self.workspace = Some(workspace);
+        self.commands = CommandStack::default();
+        let sr = self
+            .audio
+            .as_ref()
+            .map(|a| a.sample_rate)
+            .unwrap_or(self.project.tempo.sample_rate);
+        match rebuild_sample_cache(&self.project, sr) {
+            Ok(cache) => self.sample_cache = Arc::new(cache),
+            Err(e) => {
+                warn!("rebuild sample cache: {e:#}");
+                self.sample_cache = Arc::new(SampleCache::default());
+            }
+        }
+        self.sync_engine();
+        self.reload_plugins_from_project();
+    }
+
     pub fn save_project(&mut self) {
         let path = if let Some(p) = &self.project_path {
             p.clone()
-        } else if let Some(folder) = rfd::FileDialog::new()
+        } else if let Some(file) = rfd::FileDialog::new()
             .set_title("Save Project")
-            .pick_folder()
+            .add_filter("CottDAW Project", &["ctgdaw"])
+            .set_file_name(format!(
+                "{}.ctgdaw",
+                sanitize_file_stem(&self.project.meta.name)
+            ))
+            .save_file()
         {
-            folder
+            ensure_ctgdaw_extension(file)
         } else {
             return;
         };
+
+        if let Err(e) = self.ensure_live_workspace() {
+            self.status = format!("Save failed: {e}");
+            return;
+        }
+
         // Persist plugin states.
         {
             let mut host = self.plugin_host.lock();
@@ -318,7 +376,7 @@ impl CottApp {
                 }
             }
         }
-        match self.project.save_to_dir(&path) {
+        match self.project.save_to_archive(&path) {
             Ok(()) => {
                 self.project_path = Some(path.clone());
                 self.status = format!("Saved {}", path.display());
@@ -328,33 +386,43 @@ impl CottApp {
     }
 
     pub fn load_project(&mut self) {
-        let Some(folder) = rfd::FileDialog::new()
+        let Some(path) = rfd::FileDialog::new()
             .set_title("Open Project")
-            .pick_folder()
+            .add_filter("CottDAW Project", &["ctgdaw", "json"])
+            .pick_file()
         else {
             return;
         };
-        match Project::load_from_dir(&folder) {
-            Ok(p) => {
-                self.stop();
-                self.project = p;
-                self.project_path = Some(folder.clone());
-                self.commands = CommandStack::default();
-                let sr = self
-                    .audio
-                    .as_ref()
-                    .map(|a| a.sample_rate)
-                    .unwrap_or(self.project.tempo.sample_rate);
-                match rebuild_sample_cache(&self.project, sr) {
-                    Ok(cache) => self.sample_cache = Arc::new(cache),
-                    Err(e) => {
-                        warn!("rebuild sample cache: {e:#}");
-                        self.sample_cache = Arc::new(SampleCache::default());
-                    }
-                }
-                self.sync_engine();
-                self.reload_plugins_from_project();
-                self.status = "Project loaded".into();
+
+        let workspace = match TempDir::new() {
+            Ok(dir) => dir,
+            Err(e) => {
+                self.status = format!("Load failed: temp workspace: {e}");
+                return;
+            }
+        };
+
+        let result = if is_ctgdaw_archive(&path) {
+            Project::load_from_archive(&path, workspace.path()).map(|p| (p, Some(path.clone())))
+        } else if is_legacy_project_json(&path) {
+            let src_dir = path.parent().unwrap_or_else(|| Path::new("."));
+            Project::load_legacy_into_workspace(src_dir, workspace.path()).map(|p| (p, None)) // Force Save As → .ctgdaw conversion
+        } else {
+            Err(cott_core::project::ProjectError::Invalid(format!(
+                "unsupported project file: {}",
+                path.display()
+            )))
+        };
+
+        match result {
+            Ok((project, archive_path)) => {
+                let name = project.meta.name.clone();
+                self.adopt_project(project, archive_path, workspace);
+                self.status = if self.project_path.is_some() {
+                    format!("Loaded {name}")
+                } else {
+                    format!("Imported legacy project {name} — Save to create a .ctgdaw file")
+                };
             }
             Err(e) => self.status = format!("Load failed: {e}"),
         }
@@ -446,14 +514,10 @@ impl CottApp {
             self.status = "Select an audio track".into();
             return;
         };
-        // Ensure project has a root for assets.
-        if self.project.root_dir.is_none() {
-            let dir = std::env::temp_dir().join(format!("cott-proj-{}", uuid::Uuid::new_v4()));
-            if let Err(e) = self.project.save_to_dir(&dir) {
-                self.status = format!("temp project: {e}");
-                return;
-            }
-            self.project_path = Some(dir);
+        // Ensure a live workspace for assets (does not set a user-facing project path).
+        if let Err(e) = self.ensure_live_workspace() {
+            self.status = e;
+            return;
         }
         match import_audio_file(&path, self.project.tempo.sample_rate) {
             Ok(decoded) => match add_audio_asset_to_project(&mut self.project, &path, &decoded) {
@@ -1305,6 +1369,41 @@ fn track_remove_command(project: &Project, track_id: TrackId) -> Option<Command>
         nodes,
         edges,
     })
+}
+
+fn sanitize_file_stem(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|c| match c {
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' => c,
+            ' ' => '-',
+            _ => '_',
+        })
+        .collect();
+    if cleaned.is_empty() {
+        "untitled".into()
+    } else {
+        cleaned
+    }
+}
+
+fn ensure_ctgdaw_extension(path: PathBuf) -> PathBuf {
+    match path.extension().and_then(|e| e.to_str()) {
+        Some(ext) if ext.eq_ignore_ascii_case("ctgdaw") => path,
+        _ => path.with_extension("ctgdaw"),
+    }
+}
+
+fn is_ctgdaw_archive(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("ctgdaw"))
+}
+
+fn is_legacy_project_json(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n.eq_ignore_ascii_case("project.json"))
 }
 
 fn configure_style(ctx: &egui::Context) {

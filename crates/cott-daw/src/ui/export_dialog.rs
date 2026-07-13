@@ -216,18 +216,34 @@ fn draw_gonio_section(ui: &mut egui::Ui, g: &mut cott_core::visualizers::GonioOp
         GonioDrawMode::Line => {
             ui.horizontal(|ui| {
                 ui.label("Line width");
-                ui.add(egui::DragValue::new(&mut g.line_width).speed(0.2).range(1..=8));
+                ui.add(
+                    egui::DragValue::new(&mut g.line_width)
+                        .speed(0.2)
+                        .range(1..=8),
+                );
                 ui.label("Sample stride");
-                ui.add(egui::DragValue::new(&mut g.sample_stride).speed(0.2).range(1..=32))
-                    .on_hover_text("Plot every Nth sample (higher = thinner / faster)");
+                ui.add(
+                    egui::DragValue::new(&mut g.sample_stride)
+                        .speed(0.2)
+                        .range(1..=32),
+                )
+                .on_hover_text("Plot every Nth sample (higher = thinner / faster)");
             });
         }
         GonioDrawMode::Dots => {
             ui.horizontal(|ui| {
                 ui.label("Point size");
-                ui.add(egui::DragValue::new(&mut g.point_size).speed(0.2).range(1..=8));
+                ui.add(
+                    egui::DragValue::new(&mut g.point_size)
+                        .speed(0.2)
+                        .range(1..=8),
+                );
                 ui.label("Sample stride");
-                ui.add(egui::DragValue::new(&mut g.sample_stride).speed(0.2).range(1..=32));
+                ui.add(
+                    egui::DragValue::new(&mut g.sample_stride)
+                        .speed(0.2)
+                        .range(1..=32),
+                );
             });
         }
     }

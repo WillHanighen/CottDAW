@@ -67,7 +67,7 @@ Useful `cott-core` areas covered by unit tests include tempo/sample conversion, 
 
 | Concern | Start here |
 |---------|------------|
-| Project JSON / tracks / default wiring | `cott-core/src/project.rs`, `clips.rs` |
+| Project `.ctgdaw` archives / tracks / default wiring | `cott-core/src/project.rs`, `archive.rs`, `clips.rs` |
 | Graph validation & compile / PDC | `cott-core/src/graph.rs` |
 | Block DSP | `cott-core/src/dsp.rs` |
 | Engine commands & offline render | `cott-core/src/engine.rs` |

@@ -27,6 +27,7 @@ bitflags = { workspace = true }
 tempfile = { workspace = true }
 cott-ipc = { workspace = true }
 hound = { workspace = true }
+zip = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

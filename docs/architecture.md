@@ -56,9 +56,9 @@ Workspace root patches `truce-rack-vst3` so Linux/yabridge chainloaders call `Mo
 
 ### `Project`
 
-Holds tempo/transport, tracks, clips, `AudioGraph`, assets, automation lanes, and opaque plugin state blobs. Runtime-only `root_dir` is skipped by serde.
+Holds tempo/transport, tracks, clips, `AudioGraph`, assets, automation lanes, and opaque plugin state blobs. Runtime-only `root_dir` is skipped by serde (it points at an extracted temporary workspace while editing).
 
-**On-disk format (v2):** a directory with `project.json` (pretty JSON), `assets/`, and `plugins/`. Plugin nodes persist their format, stable ID, path, and opaque state. Saves use `project.json.tmp` then atomic rename. Autosaves land under the OS data dir (`CottDAW/autosave/`).
+**On-disk format (v2):** a `.ctgdaw` ZIP archive containing `project.json` (pretty JSON) and `assets/`. Plugin nodes persist their format, stable ID, path, and opaque state. Saves write a sibling `*.ctgdaw.tmp` then atomically rename. Autosaves land under the OS data dir as `CottDAW/autosave/autosave-*.ctgdaw`. Legacy directory projects (`project.json` + `assets/`) can still be opened and are converted on the next Save.
 
 ### Tracks and clips
 
@@ -180,7 +180,7 @@ Worker death → instance `failed`; instrument silence / effect bypass; UI offer
 |--------|-----|
 | Acyclic graph | Simple scheduling and deterministic offline render |
 | One process per plugin | Contain crashes and hangs |
-| Directory + JSON projects | Readable, git-friendly, colocated assets |
+| `.ctgdaw` ZIP archives | Portable single-file projects with bundled assets |
 | No feedback | Loops rejected rather than delayed-feedback engines |
 | Stereo host path | Matches SHM and MVP mixer |
 

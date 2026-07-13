@@ -1,5 +1,6 @@
 //! CottDAW core library: project model, graph, DSP, and engine messaging.
 
+pub mod archive;
 pub mod automation;
 pub mod clips;
 pub mod commands;

@@ -210,11 +210,7 @@ impl GonioRenderer {
         for i in 0..n {
             max_amp = max_amp.max(left[i].abs()).max(right[i].abs());
         }
-        let target = if max_amp > 0.01 {
-            0.7 / max_amp
-        } else {
-            1.0
-        };
+        let target = if max_amp > 0.01 { 0.7 / max_amp } else { 1.0 };
         self.normalization = self.normalization * 0.95 + target * 0.05;
     }
 
@@ -399,15 +395,27 @@ mod tests {
     #[test]
     fn mono_maps_to_vertical() {
         let (side, mid) = stereo_xy(0.5, 0.5);
-        assert!(side.abs() < 1e-6, "mono should have near-zero side, got {side}");
-        assert!(mid > 0.0, "mono positive should have positive mid, got {mid}");
+        assert!(
+            side.abs() < 1e-6,
+            "mono should have near-zero side, got {side}"
+        );
+        assert!(
+            mid > 0.0,
+            "mono positive should have positive mid, got {mid}"
+        );
     }
 
     #[test]
     fn antiphase_maps_to_horizontal() {
         let (side, mid) = stereo_xy(0.5, -0.5);
-        assert!(mid.abs() < 1e-6, "antiphase should have near-zero mid, got {mid}");
-        assert!(side > 0.0, "L>R antiphase should have positive side, got {side}");
+        assert!(
+            mid.abs() < 1e-6,
+            "antiphase should have near-zero mid, got {mid}"
+        );
+        assert!(
+            side > 0.0,
+            "L>R antiphase should have positive side, got {side}"
+        );
     }
 
     #[test]
@@ -434,7 +442,10 @@ mod tests {
         g.render_frame(&left, &right);
         assert_eq!(g.pixels().len(), 256 * 256 * 3);
         let lit = g.pixels().chunks_exact(3).filter(|c| c[1] > 20).count();
-        assert!(lit > 10, "expected lit green pixels from line stroke, got {lit}");
+        assert!(
+            lit > 10,
+            "expected lit green pixels from line stroke, got {lit}"
+        );
     }
 
     #[test]

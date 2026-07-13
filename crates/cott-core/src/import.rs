@@ -268,10 +268,7 @@ pub fn cache_put(cache: &mut crate::dsp::SampleCache, asset_id: AssetId, buffer:
 }
 
 /// Rebuild sample cache by decoding all non-missing audio assets from disk.
-pub fn rebuild_sample_cache(
-    project: &Project,
-    target_sr: u32,
-) -> Result<crate::dsp::SampleCache> {
+pub fn rebuild_sample_cache(project: &Project, target_sr: u32) -> Result<crate::dsp::SampleCache> {
     let mut cache = crate::dsp::SampleCache::default();
     let Some(root) = project.root_dir.as_ref() else {
         return Ok(cache);

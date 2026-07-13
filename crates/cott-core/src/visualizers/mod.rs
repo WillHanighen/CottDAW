@@ -2,6 +2,4 @@
 
 pub mod gonio;
 
-pub use gonio::{
-    GonioColorMode, GonioDrawMode, GonioOptions, GonioRenderer, stereo_xy,
-};
+pub use gonio::{GonioColorMode, GonioDrawMode, GonioOptions, GonioRenderer, stereo_xy};

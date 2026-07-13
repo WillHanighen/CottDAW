@@ -107,11 +107,8 @@ impl FloatingEditorWindow {
                 | ButtonMotionMask
                 | SubstructureNotifyMask
                 | StructureNotifyMask;
-            let embed_mask = CWBackPixel
-                | CWBorderPixel
-                | CWColormap
-                | CWEventMask
-                | CWOverrideRedirect;
+            let embed_mask =
+                CWBackPixel | CWBorderPixel | CWColormap | CWEventMask | CWOverrideRedirect;
             let embed = (xlib.XCreateWindow)(
                 display,
                 shell,
@@ -138,11 +135,7 @@ impl FloatingEditorWindow {
 
             info!(
                 title,
-                width,
-                height,
-                shell,
-                embed,
-                "created floating X11 editor parent"
+                width, height, shell, embed, "created floating X11 editor parent"
             );
 
             Ok(Self {
@@ -196,7 +189,8 @@ impl FloatingEditorWindow {
                 match event.get_type() {
                     t if t == ClientMessage => {
                         let cm = event.client_message;
-                        if cm.window == self.shell && cm.data.get_long(0) as c_ulong == self.wm_delete
+                        if cm.window == self.shell
+                            && cm.data.get_long(0) as c_ulong == self.wm_delete
                         {
                             info!("editor window closed by user");
                             self.user_closed = true;

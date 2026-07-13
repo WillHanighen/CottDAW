@@ -56,7 +56,11 @@ pub fn draw_top_bar(app: &mut CottApp, ctx: &egui::Context) {
             let old_unit = app.project.tempo.beat_unit;
             let mut sig_changed = false;
             if ui
-                .add(egui::DragValue::new(&mut beats_per_bar).speed(0.2).range(1..=16))
+                .add(
+                    egui::DragValue::new(&mut beats_per_bar)
+                        .speed(0.2)
+                        .range(1..=16),
+                )
                 .on_hover_text("Beats per bar (numerator)")
                 .changed()
             {
@@ -64,7 +68,11 @@ pub fn draw_top_bar(app: &mut CottApp, ctx: &egui::Context) {
             }
             ui.label("/");
             if ui
-                .add(egui::DragValue::new(&mut beat_unit).speed(0.2).range(1..=16))
+                .add(
+                    egui::DragValue::new(&mut beat_unit)
+                        .speed(0.2)
+                        .range(1..=16),
+                )
                 .on_hover_text("Beat unit (denominator)")
                 .changed()
             {

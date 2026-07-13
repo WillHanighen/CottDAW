@@ -60,7 +60,12 @@ pub struct Clip {
 }
 
 impl Clip {
-    pub fn new_midi(track_id: TrackId, name: impl Into<String>, start_beats: f64, length_beats: f64) -> Self {
+    pub fn new_midi(
+        track_id: TrackId,
+        name: impl Into<String>,
+        start_beats: f64,
+        length_beats: f64,
+    ) -> Self {
         Self {
             id: ClipId::new(),
             track_id,
@@ -336,8 +341,16 @@ mod tests {
         let tempo = TempoMap::default();
         // At 120bpm / 48kHz, 1 beat = 24000 samples. Note spans [0, 24000).
         let events = schedule_midi_for_block(&[clip], track, &tempo, SamplePos(0), 48_000);
-        assert!(events.iter().any(|e| e.status & 0xf0 == 0x90 && e.data1 == 60));
-        assert!(events.iter().any(|e| e.status & 0xf0 == 0x80 && e.data1 == 60));
+        assert!(
+            events
+                .iter()
+                .any(|e| e.status & 0xf0 == 0x90 && e.data1 == 60)
+        );
+        assert!(
+            events
+                .iter()
+                .any(|e| e.status & 0xf0 == 0x80 && e.data1 == 60)
+        );
     }
 
     /// Streaming MIDI: note-on and note-off may land in different blocks; middle
@@ -373,9 +386,11 @@ mod tests {
         let clip_end = tempo.beat_to_sample(BeatPos(4.0));
 
         let events = schedule_midi_for_block(&[clip], track, &tempo, clip_end, 256);
-        assert!(events
-            .iter()
-            .any(|e| e.status & 0xf0 == 0x80 && e.data1 == 60));
+        assert!(
+            events
+                .iter()
+                .any(|e| e.status & 0xf0 == 0x80 && e.data1 == 60)
+        );
     }
 
     #[test]

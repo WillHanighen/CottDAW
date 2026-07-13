@@ -6,8 +6,8 @@ use std::path::Path;
 use tracing::debug;
 use vst3::ComPtr;
 use vst3::Steinberg::{
-    IPluginFactory, IPluginFactory2, IPluginFactory2Trait, IPluginFactoryTrait, PClassInfo2,
-    PClassInfo2_, PClassInfo_, TUID, kResultOk,
+    IPluginFactory, IPluginFactory2, IPluginFactory2Trait, IPluginFactoryTrait, PClassInfo_,
+    PClassInfo2, PClassInfo2_, TUID, kResultOk,
 };
 
 /// Returns true when the VST3 class subcategories indicate an instrument.
@@ -69,8 +69,7 @@ pub fn bundle_is_instrument(bundle: &Path, uid_hex: &str) -> Option<bool> {
     })();
 
     if entered {
-        if let Ok(exit) =
-            unsafe { library.get::<unsafe extern "C" fn() -> bool>(b"ModuleExit\0") }
+        if let Ok(exit) = unsafe { library.get::<unsafe extern "C" fn() -> bool>(b"ModuleExit\0") }
         {
             unsafe {
                 let _ = exit();
@@ -107,21 +106,8 @@ pub fn name_looks_like_instrument(name: &str) -> bool {
 pub fn name_looks_like_effect(name: &str) -> bool {
     let n = name.to_ascii_lowercase();
     [
-        "eq",
-        "comp",
-        "reverb",
-        "delay",
-        "limiter",
-        "gate",
-        "filter",
-        "mix link",
-        "utility",
-        "analyzer",
-        "saturat",
-        "distort",
-        "chorus",
-        "flanger",
-        "phaser",
+        "eq", "comp", "reverb", "delay", "limiter", "gate", "filter", "mix link", "utility",
+        "analyzer", "saturat", "distort", "chorus", "flanger", "phaser",
     ]
     .iter()
     .any(|needle| n.contains(needle))

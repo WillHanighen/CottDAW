@@ -102,22 +102,21 @@ Automation also targets plugin parameters when available.
 
 ## Projects
 
-Projects are **directories**, not single files:
+Projects are single **`.ctgdaw`** files (ZIP archives in disguise, similar to `.mrpack`):
 
 ```
-my-project/
+song.ctgdaw
   project.json    # versioned manifest
   assets/         # imported media
-  plugins/        # reserved for plugin-related data
 ```
 
 | Action | How |
 |--------|-----|
-| Save | Ctrl+S or **Save** (folder picker) |
-| Open | Ctrl+O or **Open** |
-| Autosave | Every ~60s under `~/.local/share/CottDAW/autosave/` |
+| Save | Ctrl+S or **Save** (creates/overwrites a `.ctgdaw` file) |
+| Open | Ctrl+O or **Open** (`.ctgdaw`, or legacy `project.json` for conversion) |
+| Autosave | Every ~60s under `~/.local/share/CottDAW/autosave/autosave-*.ctgdaw` |
 
-Relative media paths are stored; missing assets are marked on load.
+Relative media paths are stored inside the archive; missing assets are marked on load. Opening a legacy folder project's `project.json` imports it into a temporary workspace — use **Save** once to write a `.ctgdaw` file.
 
 ## Import
 

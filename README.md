@@ -14,7 +14,7 @@ Arrangement timeline, piano-roll MIDI editing, an authoritative acyclic audio/MI
 - yabridge support for Windows VST2, VST3, and CLAP plugins
 - Parameter automation lanes
 - Undo / redo
-- Project save/load with periodic autosave
+- Project `.ctgdaw` save/load with periodic autosave
 - Offline export to WAV, Ogg Opus, or Gonio MP4 (via `ffmpeg`)
 
 ## Documentation

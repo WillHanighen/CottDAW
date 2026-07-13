@@ -1,6 +1,6 @@
 //! Realtime-safe engine messaging and offline renderer.
 
-use crate::clips::{midi_panic_events, notes_held_at, ScheduledMidiEvent};
+use crate::clips::{ScheduledMidiEvent, midi_panic_events, notes_held_at};
 use crate::dsp::{
     AudioBuffer, MeterState, NullPluginHost, PluginAudioHost, ProcessContext, SampleCache,
     process_block,
@@ -208,23 +208,18 @@ impl AudioProcessor {
 
         for track_id in tracks {
             for (pitch, channel) in notes_held_at(&self.clips, track_id, &self.tempo, hold_pos) {
-                self.pending_panic_midi.push((
-                    track_id,
-                    ScheduledMidiEvent::note_off(0, pitch, channel),
-                ));
+                self.pending_panic_midi
+                    .push((track_id, ScheduledMidiEvent::note_off(0, pitch, channel)));
             }
             // Nuclear fallback: note-off every pitch on ch 0. Covers overlapping
             // clip duplicates / stolen voices that notes_held_at may miss.
             // 128 events × tracks still fits comfortably under MAX_MIDI_EVENTS
             // for typical session sizes; we cap tracks if needed below.
             for pitch in 0u8..=127 {
-                self.pending_panic_midi.push((
-                    track_id,
-                    ScheduledMidiEvent::note_off(0, pitch, 0),
-                ));
+                self.pending_panic_midi
+                    .push((track_id, ScheduledMidiEvent::note_off(0, pitch, 0)));
             }
-            self.pending_panic_midi
-                .extend(midi_panic_events(track_id));
+            self.pending_panic_midi.extend(midi_panic_events(track_id));
         }
 
         // Keep SHM MIDI under the 512-event cap (leave room for same-block note-ons).
@@ -243,8 +238,8 @@ impl AudioProcessor {
                     self.plan = plan;
                 }
                 EngineCommand::SetTransport(state) => {
-                    let leaving_play =
-                        self.transport == TransportState::Playing && state != TransportState::Playing;
+                    let leaving_play = self.transport == TransportState::Playing
+                        && state != TransportState::Playing;
                     if leaving_play || state == TransportState::Stopped {
                         self.queue_midi_panic();
                     }
@@ -299,13 +294,7 @@ impl AudioProcessor {
         }
     }
 
-    fn start_preview(
-        &mut self,
-        track_id: TrackId,
-        pitch: u8,
-        velocity: u8,
-        duration_samples: u32,
-    ) {
+    fn start_preview(&mut self, track_id: TrackId, pitch: u8, velocity: u8, duration_samples: u32) {
         // Preview + arrangement on the same pitch creates two note-ons and one
         // note-off → orphan voice that hangs after a partial release.
         if self.transport == TransportState::Playing {
@@ -387,8 +376,7 @@ impl AudioProcessor {
         // transport is already Stopped (graph would otherwise be skipped).
         let mut preview_midi = std::mem::take(&mut self.pending_panic_midi);
         let flush_panic = !preview_midi.is_empty();
-        let had_preview_work =
-            !self.previews.is_empty() || !self.pending_preview_midi.is_empty();
+        let had_preview_work = !self.previews.is_empty() || !self.pending_preview_midi.is_empty();
         preview_midi.extend(self.tick_previews(frames as u32));
         preview_midi.sort_by(|(_, a), (_, b)| {
             a.sample_offset
@@ -596,8 +584,7 @@ mod tests {
     fn stop_flushes_midi_panic_to_instruments() {
         let mut project = Project::new("panic");
         let track = project.add_midi_track("Synth");
-        let _ =
-            project.attach_instrument(track, "stub".into(), "/dev/null".into(), "Stub".into());
+        let _ = project.attach_instrument(track, "stub".into(), "/dev/null".into(), "Stub".into());
 
         let shared = Arc::new(SharedTransport::new());
         let mut proc = AudioProcessor::new(shared);
@@ -651,8 +638,7 @@ mod tests {
     fn seek_queues_midi_panic() {
         let mut project = Project::new("seek");
         let track = project.add_midi_track("Synth");
-        let _ =
-            project.attach_instrument(track, "stub".into(), "/dev/null".into(), "Stub".into());
+        let _ = project.attach_instrument(track, "stub".into(), "/dev/null".into(), "Stub".into());
 
         let shared = Arc::new(SharedTransport::new());
         let mut proc = AudioProcessor::new(shared);
