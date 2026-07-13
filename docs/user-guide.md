@@ -38,17 +38,24 @@ Default signal paths:
 - Click the ruler or a lane to **seek** the playhead.
 - On a MIDI track, **+ Clip** creates a one-bar clip at the playhead.
 - **Drag** clips to move (¼-beat quantize); drag the **right edge** to resize.
-- Right-click a clip for delete (or use Delete / Backspace with the clip selected).
+- Right-click a clip for **Copy**, **Duplicate**, **Move to track**, or **Delete** (or use Delete / Backspace with the clip selected).
+- **Ctrl+C / Ctrl+V** copy and paste clips; paste starts at the mouse (hovered lane) or the playhead.
+- **Ctrl+D** duplicates the selected clip immediately after itself.
+- **F2** renames the selected track inline.
 - Track headers expose **gain**, **mute**, and peak meters.
 
 ### Piano roll
 
 1. Select a MIDI clip (or create one and switch to **Piano Roll**).
 2. **Left-click** to add, move, or resize notes (¼-beat quantize).
-3. **Right-click** a note to remove it.
-4. Click piano keys to audition pitches while stopped.
+3. **Ctrl+click** toggles notes in a multi-selection; **Shift+drag** on empty grid draws a lasso selection.
+4. **Ctrl+C / Ctrl+V** copy and paste selected notes; paste aligns the earliest note to the mouse (or the playhead).
+5. **Delete / Backspace** removes the selected notes (or the whole clip when no notes are selected).
+6. **Right-click** a note to remove it (or the whole selection if that note is selected).
+7. Double-click **Editing: …** to rename the clip.
+8. Click piano keys to audition pitches while stopped.
 
-Pitch range shown is roughly C2–C6. Editing notes can grow or shrink the clip length.
+Pitch range shown is roughly C2–C6. Editing notes can grow or shrink the clip length. Each MIDI clip stores its own scale guide in the project file.
 
 ## Plugins
 
@@ -147,12 +154,16 @@ Shortcuts are ignored while a text field has focus.
 | Home | Stop and rewind |
 | L | Toggle loop |
 | B | Toggle plugin browser |
+| F2 | Rename selected track |
 | Ctrl+Z | Undo |
 | Ctrl+Shift+Z / Ctrl+Y | Redo |
 | Ctrl+S | Save project |
 | Ctrl+O | Open project |
 | Ctrl+E | Export |
-| Delete / Backspace | Delete selection (clip, or graph node in Routing/Plugins) |
+| Ctrl+C | Copy selected notes (piano roll) or selected clip |
+| Ctrl+V | Paste notes/clip near the mouse (or playhead fallback) |
+| Ctrl+D | Duplicate selected clip |
+| Delete / Backspace | Delete selected notes, else selected clip / graph node / track |
 
 ## Tips
 

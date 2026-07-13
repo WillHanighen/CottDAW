@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
-pub const PROJECT_VERSION: u32 = 2;
+pub const PROJECT_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Asset {
@@ -126,7 +126,7 @@ impl Project {
             .clips
             .iter()
             .filter_map(|clip| match &clip.content {
-                ClipContent::Midi { notes } => notes
+                ClipContent::Midi { notes, .. } => notes
                     .iter()
                     .map(|note| clip.start_beats + note.end_beats())
                     .reduce(f64::max),
@@ -490,6 +490,31 @@ mod tests {
         assert_eq!(loaded.tracks.len(), 2);
         assert_eq!(loaded.meta.name, "Test");
         assert!(!loaded.graph.nodes.is_empty());
+    }
+
+    #[test]
+    fn clip_scale_settings_survive_project_roundtrip() {
+        let dir = tempdir().unwrap();
+        let mut project = Project::new("Scale");
+        let track = project.add_midi_track("Synth");
+        let mut clip = Clip::new_midi(track, "Minor clip", 0.0, 4.0);
+        *clip.scale_mut().unwrap() = crate::scale::ScaleSettings {
+            highlight: true,
+            root: 9,
+            mode: crate::scale::ScaleMode::HarmonicMinor,
+        };
+        project.clips.push(clip);
+        project.save_to_dir(dir.path()).unwrap();
+
+        let loaded = Project::load_from_dir(dir.path()).unwrap();
+        assert_eq!(
+            loaded.clips[0].scale(),
+            Some(crate::scale::ScaleSettings {
+                highlight: true,
+                root: 9,
+                mode: crate::scale::ScaleMode::HarmonicMinor,
+            })
+        );
     }
 
     #[test]

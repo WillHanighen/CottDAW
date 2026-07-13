@@ -43,9 +43,19 @@ pub enum Command {
         clip_id: ClipId,
         note: MidiNote,
     },
+    /// Add a group of notes as one undoable operation (for chord stamps).
+    AddNotes {
+        clip_id: ClipId,
+        notes: Vec<MidiNote>,
+    },
     RemoveNote {
         clip_id: ClipId,
         note: MidiNote,
+    },
+    /// Remove a group of notes as one undoable operation.
+    RemoveNotes {
+        clip_id: ClipId,
+        notes: Vec<MidiNote>,
     },
     EditNote {
         clip_id: ClipId,
@@ -273,6 +283,24 @@ fn apply(project: &mut Project, cmd: &Command, reverse: bool) {
                 }
             }
         }
+        Command::AddNotes {
+            clip_id,
+            notes: added,
+        } => {
+            if let Some(clip) = project.clips.iter_mut().find(|c| c.id == *clip_id) {
+                if let Some(notes) = clip.notes_mut() {
+                    if reverse {
+                        notes.retain(|note| !added.iter().any(|added| added.id == note.id));
+                    } else {
+                        for note in added {
+                            if !notes.iter().any(|existing| existing.id == note.id) {
+                                notes.push(note.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
         Command::RemoveNote { clip_id, note } => {
             if let Some(clip) = project.clips.iter_mut().find(|c| c.id == *clip_id) {
                 if let Some(notes) = clip.notes_mut() {
@@ -280,6 +308,24 @@ fn apply(project: &mut Project, cmd: &Command, reverse: bool) {
                         notes.push(note.clone());
                     } else {
                         notes.retain(|n| n.id != note.id);
+                    }
+                }
+            }
+        }
+        Command::RemoveNotes {
+            clip_id,
+            notes: removed,
+        } => {
+            if let Some(clip) = project.clips.iter_mut().find(|c| c.id == *clip_id) {
+                if let Some(notes) = clip.notes_mut() {
+                    if reverse {
+                        for note in removed {
+                            if !notes.iter().any(|existing| existing.id == note.id) {
+                                notes.push(note.clone());
+                            }
+                        }
+                    } else {
+                        notes.retain(|note| !removed.iter().any(|removed| removed.id == note.id));
                     }
                 }
             }
@@ -498,6 +544,64 @@ mod tests {
         assert!(project.clips.is_empty());
         assert!(stack.redo(&mut project));
         assert_eq!(project.clips.len(), 1);
+    }
+
+    #[test]
+    fn chord_notes_undo_as_one_command() {
+        let mut project = Project::new("t");
+        let track = project.add_midi_track("A");
+        let clip = Clip::new_midi(track, "C", 0.0, 4.0);
+        let clip_id = clip.id;
+        project.clips.push(clip);
+        let notes = [60, 64, 67]
+            .map(|pitch| MidiNote::new(pitch, 100, 0.0, 1.0))
+            .to_vec();
+        let mut stack = CommandStack::default();
+
+        stack.push(
+            &mut project,
+            Command::AddNotes {
+                clip_id,
+                notes: notes.clone(),
+            },
+        );
+        assert_eq!(project.clips[0].notes().unwrap().len(), 3);
+        assert!(stack.undo(&mut project));
+        assert!(project.clips[0].notes().unwrap().is_empty());
+        assert!(stack.redo(&mut project));
+        assert_eq!(project.clips[0].notes().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn remove_notes_undo_as_one_command() {
+        let mut project = Project::new("t");
+        let track = project.add_midi_track("A");
+        let clip = Clip::new_midi(track, "C", 0.0, 4.0);
+        let clip_id = clip.id;
+        project.clips.push(clip);
+        let notes = [60, 64, 67]
+            .map(|pitch| MidiNote::new(pitch, 100, 0.0, 1.0))
+            .to_vec();
+        let mut stack = CommandStack::default();
+        stack.push(
+            &mut project,
+            Command::AddNotes {
+                clip_id,
+                notes: notes.clone(),
+            },
+        );
+        stack.push(
+            &mut project,
+            Command::RemoveNotes {
+                clip_id,
+                notes: notes.clone(),
+            },
+        );
+        assert!(project.clips[0].notes().unwrap().is_empty());
+        assert!(stack.undo(&mut project));
+        assert_eq!(project.clips[0].notes().unwrap().len(), 3);
+        assert!(stack.redo(&mut project));
+        assert!(project.clips[0].notes().unwrap().is_empty());
     }
 
     #[test]

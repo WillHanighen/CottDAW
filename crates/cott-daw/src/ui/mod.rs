@@ -24,6 +24,62 @@ pub enum LowerTab {
     Plugins,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ChordKind {
+    #[default]
+    Major,
+    Minor,
+    Diminished,
+    Augmented,
+    Suspended2,
+    Suspended4,
+    Major7,
+    Minor7,
+    Dominant7,
+}
+
+impl ChordKind {
+    pub const ALL: [Self; 9] = [
+        Self::Major,
+        Self::Minor,
+        Self::Diminished,
+        Self::Augmented,
+        Self::Suspended2,
+        Self::Suspended4,
+        Self::Major7,
+        Self::Minor7,
+        Self::Dominant7,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Major => "Major",
+            Self::Minor => "Minor",
+            Self::Diminished => "Diminished",
+            Self::Augmented => "Augmented",
+            Self::Suspended2 => "Suspended 2",
+            Self::Suspended4 => "Suspended 4",
+            Self::Major7 => "Major 7",
+            Self::Minor7 => "Minor 7",
+            Self::Dominant7 => "Dominant 7",
+        }
+    }
+
+    pub fn intervals(self) -> &'static [u8] {
+        match self {
+            Self::Major => &[0, 4, 7],
+            Self::Minor => &[0, 3, 7],
+            Self::Diminished => &[0, 3, 6],
+            Self::Augmented => &[0, 4, 8],
+            Self::Suspended2 => &[0, 2, 7],
+            Self::Suspended4 => &[0, 5, 7],
+            Self::Major7 => &[0, 4, 7, 11],
+            Self::Minor7 => &[0, 3, 7, 10],
+            Self::Dominant7 => &[0, 4, 7, 10],
+        }
+    }
+}
+
 /// In-progress piano-roll note interaction (survives frame-to-frame).
 #[derive(Debug, Clone)]
 pub enum PianoNoteDrag {
@@ -33,6 +89,7 @@ pub enum PianoNoteDrag {
         pitch: u8,
         origin_beat: f64,
         end_beat: f64,
+        chord: Option<ChordKind>,
     },
     /// Drag note body to move pitch/start.
     Move {
@@ -52,6 +109,26 @@ pub enum PianoNoteDrag {
         start_beats: f64,
         length_beats: f64,
     },
+    /// Shift-drag empty grid to lasso-select notes.
+    SelectLasso {
+        clip_id: ClipId,
+        origin: egui::Pos2,
+        current: egui::Pos2,
+    },
+}
+
+/// Clipboard payload for piano-roll notes (relative timing preserved).
+#[derive(Debug, Clone)]
+pub struct NoteClipboard {
+    pub notes: Vec<MidiNote>,
+    /// Earliest start among copied notes — paste aligns this to the target beat.
+    pub anchor_beat: f64,
+}
+
+/// Clipboard payload for arrangement clips.
+#[derive(Debug, Clone)]
+pub struct ClipClipboard {
+    pub template: cott_core::clips::Clip,
 }
 
 /// In-progress arrangement clip drag (survives frame-to-frame).
@@ -101,11 +178,27 @@ pub struct UiState {
     pub piano_drag: Option<PianoNoteDrag>,
     /// Last pitch auditioned from the piano roll (avoid retrigger spam).
     pub piano_preview_pitch: Option<u8>,
-    /// Scale/key highlighting shown in the piano roll.
-    pub scale: scale::ScaleSettings,
+    /// When enabled, drawing one note stamps the selected chord.
+    pub chord_stamp_enabled: bool,
+    pub chord_kind: ChordKind,
+    /// Selected note IDs for the currently edited MIDI clip.
+    pub selected_notes: Vec<NoteId>,
+    /// Clip that owns `selected_notes` (cleared when the active clip changes).
+    pub selected_notes_clip: Option<ClipId>,
+    pub note_clipboard: Option<NoteClipboard>,
+    pub clip_clipboard: Option<ClipClipboard>,
+    /// When true, seed the OS clipboard this frame so egui emits Paste on Ctrl+V.
+    pub seed_os_clipboard: bool,
+    /// Last hovered clip-local beat in the piano roll (for paste anchoring).
+    pub piano_hover_beat: Option<f64>,
+    /// Last hovered arrangement beat / track (for clip paste anchoring).
+    pub arrangement_hover_beat: Option<f64>,
+    pub arrangement_hover_track: Option<TrackId>,
     pub clip_drag: Option<ArrangementClipDrag>,
     /// Track being renamed inline, plus the in-progress edit buffer.
     pub renaming_track: Option<(TrackId, String)>,
+    /// Clip being renamed inline from the piano-roll toolbar.
+    pub renaming_clip: Option<(ClipId, String)>,
     /// Export settings window (path chosen after confirm).
     pub show_export_dialog: bool,
     pub export_dialog: ExportDialogState,
@@ -135,9 +228,19 @@ impl Default for UiState {
             graph_panning: false,
             piano_drag: None,
             piano_preview_pitch: None,
-            scale: scale::ScaleSettings::default(),
+            chord_stamp_enabled: false,
+            chord_kind: ChordKind::default(),
+            selected_notes: Vec::new(),
+            selected_notes_clip: None,
+            note_clipboard: None,
+            clip_clipboard: None,
+            seed_os_clipboard: false,
+            piano_hover_beat: None,
+            arrangement_hover_beat: None,
+            arrangement_hover_track: None,
             clip_drag: None,
             renaming_track: None,
+            renaming_clip: None,
             show_export_dialog: false,
             export_dialog: ExportDialogState::default(),
         }
@@ -146,6 +249,12 @@ impl Default for UiState {
 
 pub fn draw(app: &mut CottApp, ctx: &egui::Context) {
     shortcuts::handle(app, ctx);
+    if app.ui.seed_os_clipboard {
+        app.ui.seed_os_clipboard = false;
+        // Seed the OS clipboard so egui emits Event::Paste on Ctrl+V even when
+        // our real payload lives in app.ui.{note,clip}_clipboard.
+        ctx.copy_text("cottdaw".into());
+    }
     transport::draw_top_bar(app, ctx);
     export_dialog::draw(app, ctx);
 

@@ -666,6 +666,7 @@ impl CottApp {
         {
             self.ui.selected_clip = None;
             self.ui.piano_drag = None;
+            self.clear_note_selection();
         }
         if self
             .ui
@@ -733,6 +734,271 @@ impl CottApp {
                 self.project.touch();
             }
         }
+    }
+
+    /// Rename a clip. Not tracked on the undo stack (low-stakes metadata edit).
+    pub fn rename_clip(&mut self, clip_id: ClipId, name: String) {
+        let name = name.trim();
+        if name.is_empty() {
+            return;
+        }
+        if let Some(clip) = self.project.clips.iter_mut().find(|c| c.id == clip_id) {
+            if clip.name != name {
+                clip.name = name.to_string();
+                self.project.touch();
+            }
+        }
+    }
+
+    pub fn clear_note_selection(&mut self) {
+        self.ui.selected_notes.clear();
+        self.ui.selected_notes_clip = None;
+    }
+
+    pub fn prune_note_selection(&mut self) {
+        let Some(clip_id) = self.ui.selected_notes_clip else {
+            self.ui.selected_notes.clear();
+            return;
+        };
+        let Some(notes) = self
+            .project
+            .clips
+            .iter()
+            .find(|c| c.id == clip_id)
+            .and_then(|c| c.notes())
+        else {
+            self.clear_note_selection();
+            return;
+        };
+        self.ui
+            .selected_notes
+            .retain(|id| notes.iter().any(|n| n.id == *id));
+        if self.ui.selected_notes.is_empty() {
+            self.ui.selected_notes_clip = None;
+        }
+    }
+
+    pub fn copy_selected_notes(&mut self) {
+        self.prune_note_selection();
+        let Some(clip_id) = self.ui.selected_notes_clip else {
+            return;
+        };
+        if self.ui.selected_notes.is_empty() {
+            return;
+        }
+        let Some(notes) = self
+            .project
+            .clips
+            .iter()
+            .find(|c| c.id == clip_id)
+            .and_then(|c| c.notes())
+        else {
+            return;
+        };
+        let selected: Vec<MidiNote> = notes
+            .iter()
+            .filter(|n| self.ui.selected_notes.contains(&n.id))
+            .cloned()
+            .collect();
+        if selected.is_empty() {
+            return;
+        }
+        let anchor_beat = selected
+            .iter()
+            .map(|n| n.start_beats)
+            .fold(f64::INFINITY, f64::min);
+        self.ui.note_clipboard = Some(crate::ui::NoteClipboard {
+            notes: selected,
+            anchor_beat,
+        });
+        // One active clipboard payload at a time.
+        self.ui.clip_clipboard = None;
+        self.ui.seed_os_clipboard = true;
+        self.status = "Copied notes".into();
+    }
+
+    pub fn paste_notes_at_hover(&mut self) {
+        let Some(clip_id) = self.ui.selected_clip else {
+            return;
+        };
+        let Some(clipboard) = self.ui.note_clipboard.clone() else {
+            self.status = "Nothing to paste".into();
+            return;
+        };
+        if clipboard.notes.is_empty() {
+            return;
+        }
+        let Some(clip) = self.project.clips.iter().find(|c| c.id == clip_id) else {
+            return;
+        };
+        if clip.notes().is_none() {
+            self.status = "Selected clip is not MIDI".into();
+            return;
+        }
+        let target_beat = self
+            .ui
+            .piano_hover_beat
+            .unwrap_or_else(|| (self.playhead_beats() - clip.start_beats).max(0.0));
+        let target_beat = (target_beat / 0.25).floor() * 0.25;
+        let delta = target_beat - clipboard.anchor_beat;
+        let mut pasted = Vec::with_capacity(clipboard.notes.len());
+        let mut max_end = 0.0_f64;
+        for note in &clipboard.notes {
+            let start = (note.start_beats + delta).max(0.0);
+            let new_note = MidiNote {
+                id: cott_core::ids::NoteId::new(),
+                pitch: note.pitch,
+                velocity: note.velocity,
+                start_beats: start,
+                length_beats: note.length_beats,
+                channel: note.channel,
+            };
+            max_end = max_end.max(new_note.end_beats());
+            pasted.push(new_note);
+        }
+        self.ensure_clip_length(clip_id, max_end);
+        let ids: Vec<_> = pasted.iter().map(|n| n.id).collect();
+        self.commands.push(
+            &mut self.project,
+            Command::AddNotes {
+                clip_id,
+                notes: pasted,
+            },
+        );
+        self.ui.selected_notes = ids;
+        self.ui.selected_notes_clip = Some(clip_id);
+        self.sync_engine();
+        self.status = "Pasted notes".into();
+    }
+
+    pub fn remove_selected_notes(&mut self) {
+        self.prune_note_selection();
+        let Some(clip_id) = self.ui.selected_notes_clip else {
+            return;
+        };
+        if self.ui.selected_notes.is_empty() {
+            return;
+        }
+        let Some(notes) = self
+            .project
+            .clips
+            .iter()
+            .find(|c| c.id == clip_id)
+            .and_then(|c| c.notes())
+        else {
+            return;
+        };
+        let removed: Vec<MidiNote> = notes
+            .iter()
+            .filter(|n| self.ui.selected_notes.contains(&n.id))
+            .cloned()
+            .collect();
+        if removed.is_empty() {
+            return;
+        }
+        self.commands.push(
+            &mut self.project,
+            Command::RemoveNotes {
+                clip_id,
+                notes: removed,
+            },
+        );
+        self.clear_note_selection();
+        self.ui.piano_drag = None;
+        self.shrink_clip_to_notes(clip_id);
+        self.sync_engine();
+        self.status = "Deleted notes".into();
+    }
+
+    pub fn copy_selected_clip(&mut self) {
+        let Some(clip_id) = self.ui.selected_clip else {
+            return;
+        };
+        let Some(clip) = self.project.clips.iter().find(|c| c.id == clip_id).cloned() else {
+            return;
+        };
+        self.ui.clip_clipboard = Some(crate::ui::ClipClipboard { template: clip });
+        // One active clipboard payload at a time.
+        self.ui.note_clipboard = None;
+        self.ui.seed_os_clipboard = true;
+        self.status = "Copied clip".into();
+    }
+
+    pub fn paste_clip_at_hover(&mut self) {
+        let Some(clipboard) = self.ui.clip_clipboard.clone() else {
+            self.status = "Nothing to paste".into();
+            return;
+        };
+        let template = &clipboard.template;
+        let clip_is_midi = matches!(template.content, ClipContent::Midi { .. });
+
+        let mut track_id = self
+            .ui
+            .arrangement_hover_track
+            .or(self.ui.selected_track)
+            .or(Some(template.track_id));
+        if let Some(tid) = track_id {
+            let compatible = self
+                .project
+                .tracks
+                .iter()
+                .find(|t| t.id == tid)
+                .is_some_and(|t| match t.kind {
+                    TrackKind::Midi => clip_is_midi,
+                    TrackKind::Audio => !clip_is_midi,
+                });
+            if !compatible {
+                track_id = self
+                    .project
+                    .tracks
+                    .iter()
+                    .find(|t| match t.kind {
+                        TrackKind::Midi => clip_is_midi,
+                        TrackKind::Audio => !clip_is_midi,
+                    })
+                    .map(|t| t.id)
+                    .or(Some(template.track_id));
+            }
+        }
+        let Some(track_id) = track_id else {
+            self.status = "No compatible track for paste".into();
+            return;
+        };
+
+        let start = self
+            .ui
+            .arrangement_hover_beat
+            .unwrap_or_else(|| self.playhead_beats());
+        let start = ((start / 0.25).round() * 0.25).max(0.0);
+        let pasted = template.duplicate_for_paste(track_id, start);
+        let new_id = pasted.id;
+        self.commands
+            .push(&mut self.project, Command::AddClip { clip: pasted });
+        self.ui.selected_clip = Some(new_id);
+        self.ui.selected_track = Some(track_id);
+        self.clear_note_selection();
+        self.sync_engine();
+        self.status = "Pasted clip".into();
+    }
+
+    pub fn duplicate_selected_clip(&mut self) {
+        let Some(clip_id) = self.ui.selected_clip else {
+            return;
+        };
+        let Some(clip) = self.project.clips.iter().find(|c| c.id == clip_id).cloned() else {
+            return;
+        };
+        let start = clip.end_beats();
+        let pasted = clip.duplicate_for_paste(clip.track_id, start);
+        let new_id = pasted.id;
+        let track_id = pasted.track_id;
+        self.commands
+            .push(&mut self.project, Command::AddClip { clip: pasted });
+        self.ui.selected_clip = Some(new_id);
+        self.ui.selected_track = Some(track_id);
+        self.clear_note_selection();
+        self.sync_engine();
+        self.status = "Duplicated clip".into();
     }
 
     pub fn load_instrument_on_selected_track(
@@ -1058,6 +1324,31 @@ impl CottApp {
         }
     }
 
+    /// Add several simultaneous notes as one undoable operation.
+    pub fn add_notes_at(&mut self, clip_id: ClipId, pitches: &[u8], start_beats: f64, length: f64) {
+        let Some((&preview_pitch, _)) = pitches.split_first() else {
+            return;
+        };
+        self.ensure_clip_length(clip_id, start_beats + length);
+        let notes = pitches
+            .iter()
+            .copied()
+            .map(|pitch| MidiNote::new(pitch, 100, start_beats, length))
+            .collect();
+        self.commands
+            .push(&mut self.project, Command::AddNotes { clip_id, notes });
+        self.sync_engine();
+        if let Some(track_id) = self
+            .project
+            .clips
+            .iter()
+            .find(|clip| clip.id == clip_id)
+            .map(|clip| clip.track_id)
+        {
+            self.preview_note(track_id, preview_pitch);
+        }
+    }
+
     /// Grow a clip so notes stay inside it.
     pub fn ensure_clip_length(&mut self, clip_id: ClipId, needed_end_beats: f64) {
         let Some(clip) = self.project.clips.iter().find(|c| c.id == clip_id) else {
@@ -1122,9 +1413,16 @@ impl CottApp {
         if self.ui.selected_clip == Some(clip_id) {
             self.ui.selected_clip = None;
             self.ui.piano_drag = None;
+            self.clear_note_selection();
+        }
+        if self.ui.selected_notes_clip == Some(clip_id) {
+            self.clear_note_selection();
         }
         if self.ui.clip_drag.as_ref().map(|d| d.clip_id) == Some(clip_id) {
             self.ui.clip_drag = None;
+        }
+        if self.ui.renaming_clip.as_ref().map(|(id, _)| *id) == Some(clip_id) {
+            self.ui.renaming_clip = None;
         }
         self.sync_engine();
         self.status = format!("Deleted clip {name}");

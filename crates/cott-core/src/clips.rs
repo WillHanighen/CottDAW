@@ -1,6 +1,7 @@
 //! MIDI and audio clips on the arrangement timeline.
 
 use crate::ids::{AssetId, ClipId, NoteId, TrackId};
+use crate::scale::ScaleSettings;
 use crate::time::{BeatPos, SamplePos};
 use serde::{Deserialize, Serialize};
 
@@ -36,6 +37,9 @@ impl MidiNote {
 pub enum ClipContent {
     Midi {
         notes: Vec<MidiNote>,
+        /// Piano-roll scale guide for this clip.
+        #[serde(default)]
+        scale: ScaleSettings,
     },
     Audio {
         asset_id: AssetId,
@@ -72,7 +76,10 @@ impl Clip {
             name: name.into(),
             start_beats,
             length_beats,
-            content: ClipContent::Midi { notes: Vec::new() },
+            content: ClipContent::Midi {
+                notes: Vec::new(),
+                scale: ScaleSettings::default(),
+            },
             color: [80, 160, 220],
         }
     }
@@ -109,15 +116,69 @@ impl Clip {
 
     pub fn notes_mut(&mut self) -> Option<&mut Vec<MidiNote>> {
         match &mut self.content {
-            ClipContent::Midi { notes } => Some(notes),
+            ClipContent::Midi { notes, .. } => Some(notes),
             _ => None,
         }
     }
 
     pub fn notes(&self) -> Option<&[MidiNote]> {
         match &self.content {
-            ClipContent::Midi { notes } => Some(notes),
+            ClipContent::Midi { notes, .. } => Some(notes),
             _ => None,
+        }
+    }
+
+    pub fn scale(&self) -> Option<ScaleSettings> {
+        match &self.content {
+            ClipContent::Midi { scale, .. } => Some(*scale),
+            _ => None,
+        }
+    }
+
+    pub fn scale_mut(&mut self) -> Option<&mut ScaleSettings> {
+        match &mut self.content {
+            ClipContent::Midi { scale, .. } => Some(scale),
+            _ => None,
+        }
+    }
+
+    /// Clone this clip onto `track_id` at `start_beats` with fresh IDs.
+    ///
+    /// MIDI notes get new [`NoteId`]s; audio clips keep the same asset reference.
+    pub fn duplicate_for_paste(&self, track_id: TrackId, start_beats: f64) -> Self {
+        let content = match &self.content {
+            ClipContent::Midi { notes, scale } => ClipContent::Midi {
+                notes: notes
+                    .iter()
+                    .map(|note| MidiNote {
+                        id: NoteId::new(),
+                        pitch: note.pitch,
+                        velocity: note.velocity,
+                        start_beats: note.start_beats,
+                        length_beats: note.length_beats,
+                        channel: note.channel,
+                    })
+                    .collect(),
+                scale: *scale,
+            },
+            ClipContent::Audio {
+                asset_id,
+                source_offset_samples,
+                gain_db,
+            } => ClipContent::Audio {
+                asset_id: *asset_id,
+                source_offset_samples: *source_offset_samples,
+                gain_db: *gain_db,
+            },
+        };
+        Self {
+            id: ClipId::new(),
+            track_id,
+            name: self.name.clone(),
+            start_beats: start_beats.max(0.0),
+            length_beats: self.length_beats,
+            content,
+            color: self.color,
         }
     }
 }
@@ -329,7 +390,54 @@ pub fn schedule_midi_for_block(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scale::ScaleMode;
     use crate::time::TempoMap;
+
+    #[test]
+    fn midi_clip_scale_roundtrips_and_defaults_for_old_projects() {
+        let track = TrackId::new();
+        let mut clip = Clip::new_midi(track, "Scale", 0.0, 4.0);
+        *clip.scale_mut().unwrap() = ScaleSettings {
+            highlight: true,
+            root: 9,
+            mode: ScaleMode::Minor,
+        };
+
+        let json = serde_json::to_value(&clip).unwrap();
+        let roundtrip: Clip = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(roundtrip.scale(), clip.scale());
+
+        let mut legacy = json;
+        legacy["content"]["Midi"]
+            .as_object_mut()
+            .unwrap()
+            .remove("scale");
+        let loaded_legacy: Clip = serde_json::from_value(legacy).unwrap();
+        assert_eq!(loaded_legacy.scale(), Some(ScaleSettings::default()));
+    }
+
+    #[test]
+    fn duplicate_for_paste_regenerates_ids() {
+        let track = TrackId::new();
+        let other = TrackId::new();
+        let mut clip = Clip::new_midi(track, "Chord", 2.0, 4.0);
+        clip.notes_mut()
+            .unwrap()
+            .push(MidiNote::new(60, 100, 0.5, 1.0));
+        clip.notes_mut()
+            .unwrap()
+            .push(MidiNote::new(64, 90, 0.5, 1.0));
+
+        let pasted = clip.duplicate_for_paste(other, 8.0);
+        assert_ne!(pasted.id, clip.id);
+        assert_eq!(pasted.track_id, other);
+        assert_eq!(pasted.start_beats, 8.0);
+        assert_eq!(pasted.name, "Chord");
+        assert_eq!(pasted.notes().unwrap().len(), 2);
+        assert_ne!(pasted.notes().unwrap()[0].id, clip.notes().unwrap()[0].id);
+        assert_eq!(pasted.notes().unwrap()[0].pitch, 60);
+        assert_eq!(pasted.notes().unwrap()[0].start_beats, 0.5);
+    }
 
     #[test]
     fn schedules_note_on_off_in_block() {

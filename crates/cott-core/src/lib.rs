@@ -11,6 +11,7 @@ pub mod graph;
 pub mod ids;
 pub mod import;
 pub mod project;
+pub mod scale;
 pub mod time;
 pub mod visualizers;
 

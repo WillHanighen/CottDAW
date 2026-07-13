@@ -1,6 +1,6 @@
 use crate::app::CottApp;
-use crate::ui::PianoNoteDrag;
 use crate::ui::scale::{self, ScaleMode, ScaleSettings};
+use crate::ui::{ChordKind, PianoNoteDrag};
 use cott_core::clips::MidiNote;
 use cott_core::commands::Command;
 use cott_core::ids::NoteId;
@@ -53,16 +53,53 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
 
     let mut pending_zoom_pct: Option<i32> = None;
 
+    // Keep note selection scoped to the active clip.
+    if app.ui.selected_notes_clip != Some(clip_id) {
+        app.clear_note_selection();
+    }
+    app.prune_note_selection();
+
     ui.horizontal(|ui| {
-        ui.label(format!("Editing: {}", clip.name));
+        let renaming = matches!(
+            &app.ui.renaming_clip,
+            Some((id, _)) if *id == clip_id
+        );
+        if renaming {
+            let mut commit = false;
+            let mut cancel = false;
+            if let Some((_, buf)) = app.ui.renaming_clip.as_mut() {
+                ui.label("Editing:");
+                let resp = ui.add(
+                    egui::TextEdit::singleline(buf)
+                        .desired_width(160.0)
+                        .clip_text(false),
+                );
+                resp.request_focus();
+                if ui.input(|i| i.key_pressed(egui::Key::Enter)) || resp.lost_focus() {
+                    commit = true;
+                } else if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    cancel = true;
+                }
+            }
+            if commit {
+                if let Some((id, buf)) = app.ui.renaming_clip.take() {
+                    app.rename_clip(id, buf);
+                }
+            } else if cancel {
+                app.ui.renaming_clip = None;
+            }
+        } else {
+            let label = ui
+                .add(egui::Label::new(format!("Editing: {}", clip.name)).sense(egui::Sense::click()));
+            if label.double_clicked() {
+                app.ui.renaming_clip = Some((clip_id, clip.name.clone()));
+            }
+            label.on_hover_text("Double-click to rename clip");
+        }
         ui.weak(format!(
             "{}/{} · {:.0} beats visible",
             app.project.tempo.beats_per_bar, app.project.tempo.beat_unit, view_beats
         ));
-        if ui.button("Add C4 @ 0").clicked() {
-            app.add_note_at(clip_id, 60, 0.0, 1.0);
-        }
-        ui.separator();
         if ui.button("−").on_hover_text("Zoom out").clicked() {
             pending_zoom_pct = Some(
                 (zoom_to_percent(app.ui.piano_zoom) - PIANO_BUTTON_ZOOM_STEP_PCT)
@@ -96,12 +133,20 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
         {
             pending_zoom_pct = Some(100);
         }
-        ui.weak("LMB: draw/move/resize · RMB: delete · Shift+scroll: zoom");
+        ui.weak(
+            "LMB: draw/move/resize · Ctrl+LMB: multi-select · Shift+drag: lasso · RMB: delete · Shift+scroll: zoom",
+        );
     });
 
-    scale_toolbar(app, ui);
+    scale_toolbar(app, ui, clip_id);
 
-    let scale = app.ui.scale;
+    let scale = app
+        .project
+        .clips
+        .iter()
+        .find(|clip| clip.id == clip_id)
+        .and_then(|clip| clip.scale())
+        .unwrap_or_default();
 
     // Region the scroll area will occupy (used for hover-test + zoom anchor).
     let region = ui.available_rect_before_wrap();
@@ -309,6 +354,7 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
             if drag_note_id == Some(note.id) {
                 continue; // drawn from live drag state below
             }
+            let selected = app.ui.selected_notes.contains(&note.id);
             paint_note(
                 &painter,
                 &grid,
@@ -316,11 +362,12 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
                 note_color(scale, note.pitch, false),
                 key_h,
                 beat_w,
+                selected,
             );
         }
 
         // Ghost / live drag note
-        if let Some(ghost) = drag_ghost(&app.ui.piano_drag) {
+        for ghost in drag_ghosts(&app.ui.piano_drag) {
             paint_note(
                 &painter,
                 &grid,
@@ -328,6 +375,26 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
                 note_color(scale, ghost.pitch, true),
                 key_h,
                 beat_w,
+                false,
+            );
+        }
+
+        // Lasso marquee
+        if let Some(PianoNoteDrag::SelectLasso {
+            origin, current, ..
+        }) = &app.ui.piano_drag
+        {
+            let lasso = egui::Rect::from_two_pos(*origin, *current);
+            painter.rect_filled(
+                lasso,
+                0.0,
+                egui::Color32::from_rgba_unmultiplied(120, 180, 255, 40),
+            );
+            painter.rect_stroke(
+                lasso,
+                0.0,
+                egui::Stroke::new(1.0, egui::Color32::from_rgb(140, 200, 255)),
+                egui::StrokeKind::Outside,
             );
         }
 
@@ -344,6 +411,13 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
             );
         }
 
+        // Track hover beat for paste anchoring (clip-local).
+        if let Some(pos) = ui.input(|i| i.pointer.hover_pos()) {
+            if grid.contains(pos) {
+                app.ui.piano_hover_beat = Some(beat_at_x(grid, pos.x, beat_w).max(0.0));
+            }
+        }
+
         // Use the canvas Response — not global pointer state — so overlays
         // (export modal, arrangement track strip, etc.) own their clicks.
         // Prefer is_pointer_button_down_on over drag_started: click_and_drag
@@ -358,7 +432,12 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
                             app.preview_note(track_id, pitch);
                         }
                     } else if grid.contains(pos) {
-                        start_drag(app, clip_id, &notes, &grid, pos, track_id, key_h, beat_w);
+                        let (ctrl, shift) = ui.input(|i| {
+                            (i.modifiers.command || i.modifiers.ctrl, i.modifiers.shift)
+                        });
+                        start_drag(
+                            app, clip_id, &notes, &grid, pos, track_id, key_h, beat_w, ctrl, shift,
+                        );
                     }
                 }
             }
@@ -371,7 +450,7 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
         }
 
         if ui.input(|i| i.pointer.primary_released()) && app.ui.piano_drag.is_some() {
-            commit_drag(app);
+            commit_drag(app, &notes, &grid, key_h, beat_w);
         }
 
         // Right-click delete nearest note, then trim trailing empty space.
@@ -380,15 +459,23 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
             if let Some(pos) = resp.interact_pointer_pos() {
                 if pos.x >= grid.left() {
                     if let Some(note) = hit_note(&notes, &grid, pos, key_h, beat_w) {
-                        app.commands.push(
-                            &mut app.project,
-                            Command::RemoveNote {
-                                clip_id,
-                                note: note.clone(),
-                            },
-                        );
-                        app.shrink_clip_to_notes(clip_id);
-                        app.sync_engine();
+                        // If the note is part of a multi-selection, delete the selection.
+                        if app.ui.selected_notes.contains(&note.id)
+                            && app.ui.selected_notes.len() > 1
+                        {
+                            app.remove_selected_notes();
+                        } else {
+                            app.commands.push(
+                                &mut app.project,
+                                Command::RemoveNote {
+                                    clip_id,
+                                    note: note.clone(),
+                                },
+                            );
+                            app.ui.selected_notes.retain(|id| *id != note.id);
+                            app.shrink_clip_to_notes(clip_id);
+                            app.sync_engine();
+                        }
                     }
                 }
             }
@@ -401,44 +488,79 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
 }
 
 /// Root / mode pickers plus a live "blueprint" of the notes in the key.
-fn scale_toolbar(app: &mut CottApp, ui: &mut egui::Ui) {
-    let s = &mut app.ui.scale;
+fn scale_toolbar(app: &mut CottApp, ui: &mut egui::Ui, clip_id: cott_core::ids::ClipId) {
+    let Some(mut scale) = app
+        .project
+        .clips
+        .iter()
+        .find(|clip| clip.id == clip_id)
+        .and_then(|clip| clip.scale())
+    else {
+        return;
+    };
+    let before = scale;
     ui.horizontal(|ui| {
-        ui.checkbox(&mut s.highlight, "Scale guide")
+        ui.checkbox(&mut scale.highlight, "Scale guide")
             .on_hover_text("Highlight in-scale rows and flag out-of-scale notes");
 
-        ui.add_enabled_ui(s.highlight, |ui| {
-            let note_names = if s.mode.prefers_flats() {
+        ui.add_enabled_ui(scale.highlight, |ui| {
+            let note_names = if scale.mode.prefers_flats() {
                 &scale::NOTE_NAMES_FLAT
             } else {
                 &scale::NOTE_NAMES_SHARP
             };
             egui::ComboBox::from_id_salt("scale_root")
-                .selected_text(note_names[s.root as usize % 12])
+                .selected_text(note_names[scale.root as usize % 12])
                 .width(52.0)
                 .show_ui(ui, |ui| {
                     for (pc, name) in note_names.iter().enumerate() {
-                        ui.selectable_value(&mut s.root, pc as u8, *name);
+                        ui.selectable_value(&mut scale.root, pc as u8, *name);
                     }
                 });
 
             egui::ComboBox::from_id_salt("scale_mode")
-                .selected_text(s.mode.name())
+                .selected_text(scale.mode.name())
                 .width(140.0)
                 .show_ui(ui, |ui| {
                     for mode in ScaleMode::ALL {
-                        ui.selectable_value(&mut s.mode, mode, mode.name());
+                        ui.selectable_value(&mut scale.mode, mode, mode.name());
                     }
                 });
         });
 
-        if s.highlight {
+        if scale.highlight {
             ui.separator();
-            ui.colored_label(ROOT_ACCENT, format!("{} {}", s.root_name(), s.mode.name()));
+            ui.colored_label(
+                ROOT_ACCENT,
+                format!("{} {}", scale.root_name(), scale.mode.name()),
+            );
             ui.weak("·");
-            ui.colored_label(SCALE_ACCENT, s.blueprint());
+            ui.colored_label(SCALE_ACCENT, scale.blueprint());
         }
+
+        ui.separator();
+        ui.checkbox(&mut app.ui.chord_stamp_enabled, "Chord stamp")
+            .on_hover_text("Draw every note of the selected chord in the clicked octave");
+        ui.add_enabled_ui(app.ui.chord_stamp_enabled, |ui| {
+            egui::ComboBox::from_id_salt("chord_stamp_kind")
+                .selected_text(app.ui.chord_kind.name())
+                .width(110.0)
+                .show_ui(ui, |ui| {
+                    for kind in ChordKind::ALL {
+                        ui.selectable_value(&mut app.ui.chord_kind, kind, kind.name());
+                    }
+                });
+        });
     });
+
+    if scale != before {
+        if let Some(clip) = app.project.clips.iter_mut().find(|clip| clip.id == clip_id) {
+            if let Some(saved_scale) = clip.scale_mut() {
+                *saved_scale = scale;
+                app.project.touch();
+            }
+        }
+    }
 }
 
 /// Note fill color: in-scale notes stay blue, out-of-scale notes turn red so
@@ -546,9 +668,18 @@ fn paint_note(
     color: egui::Color32,
     key_h: f32,
     beat_w: f32,
+    selected: bool,
 ) {
     if let Some(nrect) = note_rect(*grid, note, key_h, beat_w) {
         painter.rect_filled(nrect, 2.0, color);
+        if selected {
+            painter.rect_stroke(
+                nrect,
+                2.0,
+                egui::Stroke::new(2.0, egui::Color32::from_rgb(255, 230, 120)),
+                egui::StrokeKind::Outside,
+            );
+        }
         // Resize handle cue on the right edge
         let handle = egui::Rect::from_min_max(
             egui::pos2(
@@ -580,6 +711,22 @@ fn hit_note<'a>(
     })
 }
 
+fn notes_in_lasso(
+    notes: &[MidiNote],
+    grid: &egui::Rect,
+    lasso: egui::Rect,
+    key_h: f32,
+    beat_w: f32,
+) -> Vec<NoteId> {
+    notes
+        .iter()
+        .filter_map(|note| {
+            let rect = note_rect(*grid, note, key_h, beat_w)?;
+            rect.intersects(lasso).then_some(note.id)
+        })
+        .collect()
+}
+
 fn hit_resize_edge(
     note: &MidiNote,
     grid: &egui::Rect,
@@ -602,9 +749,28 @@ fn start_drag(
     track_id: cott_core::ids::TrackId,
     key_h: f32,
     beat_w: f32,
+    ctrl: bool,
+    shift: bool,
 ) {
     if let Some(note) = hit_note(notes, grid, pos, key_h, beat_w) {
+        if ctrl {
+            // Toggle membership without starting a move.
+            app.ui.selected_notes_clip = Some(clip_id);
+            if let Some(idx) = app.ui.selected_notes.iter().position(|id| *id == note.id) {
+                app.ui.selected_notes.remove(idx);
+            } else {
+                app.ui.selected_notes.push(note.id);
+            }
+            if app.ui.selected_notes.is_empty() {
+                app.ui.selected_notes_clip = None;
+            }
+            app.preview_note(track_id, note.pitch);
+            return;
+        }
+
         if hit_resize_edge(note, grid, pos, key_h, beat_w) {
+            app.ui.selected_notes = vec![note.id];
+            app.ui.selected_notes_clip = Some(clip_id);
             app.ui.piano_drag = Some(PianoNoteDrag::Resize {
                 clip_id,
                 note_id: note.id,
@@ -615,6 +781,14 @@ fn start_drag(
             app.preview_note(track_id, note.pitch);
             return;
         }
+
+        // Plain click selects this note (unless already in a multi-selection).
+        if !app.ui.selected_notes.contains(&note.id) || app.ui.selected_notes_clip != Some(clip_id)
+        {
+            app.ui.selected_notes = vec![note.id];
+            app.ui.selected_notes_clip = Some(clip_id);
+        }
+
         let beat = beat_at_x(*grid, pos.x, beat_w);
         app.ui.piano_drag = Some(PianoNoteDrag::Move {
             clip_id,
@@ -629,6 +803,17 @@ fn start_drag(
         return;
     }
 
+    // Empty grid: Shift+drag = lasso; otherwise draw (and clear selection).
+    if shift {
+        app.ui.piano_drag = Some(PianoNoteDrag::SelectLasso {
+            clip_id,
+            origin: pos,
+            current: pos,
+        });
+        return;
+    }
+
+    app.clear_note_selection();
     let Some(pitch) = pitch_at_y(*grid, pos.y, key_h) else {
         return;
     };
@@ -638,6 +823,7 @@ fn start_drag(
         pitch,
         origin_beat: beat,
         end_beat: beat + MIN_NOTE_LEN,
+        chord: app.ui.chord_stamp_enabled.then_some(app.ui.chord_kind),
     });
     app.preview_note(track_id, pitch);
 }
@@ -702,31 +888,40 @@ fn update_drag(
             let end = quantize_round(beat).max(*start_beats + MIN_NOTE_LEN);
             *length_beats = (end - *start_beats).max(MIN_NOTE_LEN);
         }
+        PianoNoteDrag::SelectLasso { current, .. } => {
+            *current = pos;
+        }
     }
     if let Some(p) = preview_pitch {
         app.preview_note_if_new_pitch(track_id, p);
     }
 }
 
-fn drag_ghost(drag: &Option<PianoNoteDrag>) -> Option<MidiNote> {
+fn drag_ghosts(drag: &Option<PianoNoteDrag>) -> Vec<MidiNote> {
     match drag {
         Some(PianoNoteDrag::Draw {
             pitch,
             origin_beat,
             end_beat,
+            chord,
             ..
         }) => {
             let start = origin_beat.min(*end_beat);
             let end = origin_beat.max(*end_beat);
             let len = (end - start).max(MIN_NOTE_LEN);
-            Some(MidiNote {
-                id: NoteId::new(),
-                pitch: *pitch,
-                velocity: 100,
-                start_beats: start,
-                length_beats: len,
-                channel: 0,
-            })
+            chord
+                .map(|kind| chord_pitches(*pitch, kind))
+                .unwrap_or_else(|| vec![*pitch])
+                .into_iter()
+                .map(|pitch| MidiNote {
+                    id: NoteId::new(),
+                    pitch,
+                    velocity: 100,
+                    start_beats: start,
+                    length_beats: len,
+                    channel: 0,
+                })
+                .collect()
         }
         Some(PianoNoteDrag::Move {
             before,
@@ -734,32 +929,43 @@ fn drag_ghost(drag: &Option<PianoNoteDrag>) -> Option<MidiNote> {
             start_beats,
             length_beats,
             ..
-        }) => Some(MidiNote {
+        }) => vec![MidiNote {
             id: before.id,
             pitch: *pitch,
             velocity: before.velocity,
             start_beats: *start_beats,
             length_beats: *length_beats,
             channel: before.channel,
-        }),
+        }],
         Some(PianoNoteDrag::Resize {
             before,
             start_beats,
             length_beats,
             ..
-        }) => Some(MidiNote {
+        }) => vec![MidiNote {
             id: before.id,
             pitch: before.pitch,
             velocity: before.velocity,
             start_beats: *start_beats,
             length_beats: *length_beats,
             channel: before.channel,
-        }),
-        None => None,
+        }],
+        Some(PianoNoteDrag::SelectLasso { .. }) | None => Vec::new(),
     }
 }
 
-fn commit_drag(app: &mut CottApp) {
+/// Build a chord around the clicked root while keeping every pitch in the
+/// root's current MIDI octave.
+fn chord_pitches(root: u8, kind: ChordKind) -> Vec<u8> {
+    let octave_start = (root / 12) * 12;
+    let root_class = root % 12;
+    kind.intervals()
+        .iter()
+        .map(|interval| octave_start + (root_class + interval) % 12)
+        .collect()
+}
+
+fn commit_drag(app: &mut CottApp, notes: &[MidiNote], grid: &egui::Rect, key_h: f32, beat_w: f32) {
     let Some(drag) = app.ui.piano_drag.take() else {
         return;
     };
@@ -769,12 +975,18 @@ fn commit_drag(app: &mut CottApp) {
             pitch,
             origin_beat,
             end_beat,
+            chord,
         } => {
             let start = origin_beat.min(end_beat);
             let end = origin_beat.max(end_beat);
             let len = (end - start).max(MIN_NOTE_LEN);
             app.ensure_clip_length(clip_id, start + len);
-            app.add_note_at(clip_id, pitch, start, len);
+            if let Some(kind) = chord {
+                let pitches = chord_pitches(pitch, kind);
+                app.add_notes_at(clip_id, &pitches, start, len);
+            } else {
+                app.add_note_at(clip_id, pitch, start, len);
+            }
         }
         PianoNoteDrag::Move {
             clip_id,
@@ -813,5 +1025,56 @@ fn commit_drag(app: &mut CottApp) {
             };
             app.edit_note(clip_id, before, after);
         }
+        PianoNoteDrag::SelectLasso {
+            clip_id,
+            origin,
+            current,
+        } => {
+            let lasso = egui::Rect::from_two_pos(origin, current);
+            let ids = notes_in_lasso(notes, grid, lasso, key_h, beat_w);
+            app.ui.selected_notes = ids;
+            app.ui.selected_notes_clip = if app.ui.selected_notes.is_empty() {
+                None
+            } else {
+                Some(clip_id)
+            };
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chord_stamp_keeps_notes_in_clicked_octave() {
+        assert_eq!(chord_pitches(71, ChordKind::Major), vec![71, 63, 66]);
+        assert!(
+            chord_pitches(71, ChordKind::Dominant7)
+                .iter()
+                .all(|pitch| pitch / 12 == 5)
+        );
+    }
+
+    #[test]
+    fn chord_stamp_uses_selected_chord_intervals() {
+        assert_eq!(chord_pitches(60, ChordKind::Minor), vec![60, 63, 67]);
+        assert_eq!(chord_pitches(60, ChordKind::Major7), vec![60, 64, 67, 71]);
+    }
+
+    #[test]
+    fn note_paste_anchor_delta_preserves_relative_timing() {
+        let notes = [
+            MidiNote::new(60, 100, 1.0, 0.5),
+            MidiNote::new(64, 100, 1.5, 0.5),
+        ];
+        let anchor = notes
+            .iter()
+            .map(|n| n.start_beats)
+            .fold(f64::INFINITY, f64::min);
+        let target = 4.0;
+        let delta = target - anchor;
+        assert!((notes[0].start_beats + delta - 4.0).abs() < 1e-9);
+        assert!((notes[1].start_beats + delta - 4.5).abs() < 1e-9);
     }
 }

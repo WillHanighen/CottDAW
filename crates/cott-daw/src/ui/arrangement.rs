@@ -296,6 +296,16 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
                 );
                 let painter = ui.painter_at(rect);
                 painter.rect_filled(rect, 0.0, egui::Color32::from_rgb(32, 34, 38));
+
+                // Track hover for clip paste anchoring.
+                if let Some(pos) = ui.input(|i| i.pointer.hover_pos()) {
+                    if rect.contains(pos) {
+                        let beat =
+                            ((pos.x - rect.left()) + app.ui.scroll_x) as f64 / beat_px as f64;
+                        app.ui.arrangement_hover_beat = Some(beat.max(0.0));
+                        app.ui.arrangement_hover_track = Some(track.id);
+                    }
+                }
                 // grid — bar lines follow time signature; faint beat lines in between
                 for b in 0..=beat_limit {
                     let x = rect.left() + b as f32 * beat_px - app.ui.scroll_x;
@@ -400,7 +410,7 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
                         egui::FontId::proportional(12.0),
                         egui::Color32::BLACK,
                     );
-                    if let ClipContent::Midi { notes } = &clip.content {
+                    if let ClipContent::Midi { notes, .. } = &clip.content {
                         paint_midi_preview(&painter, clip_rect, notes, draw_len);
                     }
 
@@ -412,8 +422,19 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
                     );
                     let clip_is_midi = matches!(clip.content, ClipContent::Midi { .. });
                     let clip_track_id = clip.track_id;
+                    let mut pending_copy_clip: Option<cott_core::ids::ClipId> = None;
+                    let mut pending_duplicate_clip: Option<cott_core::ids::ClipId> = None;
                     clip_resp.context_menu(|ui| {
                         ui.label(&clip.name);
+                        ui.separator();
+                        if ui.button("Copy").clicked() {
+                            pending_copy_clip = Some(clip_id);
+                            ui.close_menu();
+                        }
+                        if ui.button("Duplicate").clicked() {
+                            pending_duplicate_clip = Some(clip_id);
+                            ui.close_menu();
+                        }
                         ui.separator();
                         ui.menu_button("Move to track", |ui| {
                             let mut any = false;
@@ -439,6 +460,14 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
                             ui.close_menu();
                         }
                     });
+                    if let Some(id) = pending_copy_clip {
+                        app.ui.selected_clip = Some(id);
+                        app.copy_selected_clip();
+                    }
+                    if let Some(id) = pending_duplicate_clip {
+                        app.ui.selected_clip = Some(id);
+                        app.duplicate_selected_clip();
+                    }
 
                     if clip_resp.hovered() && app.ui.clip_drag.is_none() {
                         let on_resize = ui
@@ -476,6 +505,9 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
                     if clip_resp.clicked() && app.ui.clip_drag.is_none() {
                         clip_handled_pointer = true;
                         app.ui.selected_track = Some(track.id);
+                        if app.ui.selected_clip != Some(clip_id) {
+                            app.clear_note_selection();
+                        }
                         app.ui.selected_clip = Some(clip_id);
                         app.ui.lower_tab = crate::ui::LowerTab::PianoRoll;
                     }
