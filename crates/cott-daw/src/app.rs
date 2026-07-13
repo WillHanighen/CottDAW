@@ -762,6 +762,11 @@ impl CottApp {
             ..Default::default()
         };
         opts.gonio = opts.gonio.clamp();
+        // Plugins are activated for the audio engine's buffer size. Rendering
+        // with a larger block would overrun the buffers they allocated at
+        // activation and produce heavy distortion, so match export block size
+        // to the size plugins were set up with.
+        opts.block_size = self.audio.as_ref().map(|a| a.buffer_size).unwrap_or(256);
 
         let project = self.project.clone();
         let sample_cache = Arc::clone(&self.sample_cache);
