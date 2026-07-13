@@ -29,13 +29,16 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
 
     let beats_per_bar = app.project.tempo.bar_length_beats();
     let beats_per_bar_i = beats_per_bar.round().max(1.0) as i32;
-    // Always show two full bars past the clip end so the grid keeps repeating.
-    let view_beats = clip.length_beats + 2.0 * beats_per_bar;
+    // At least 16 bars (or the arrangement length), plus two bars past the clip
+    // so you can draw past the end and grow it. Default 1-bar clips used to
+    // cap the editor at 12 beats with no horizontal range left to scroll.
+    let min_view = (16.0 * beats_per_bar).max(super::arrangement::timeline_length_beats(app));
+    let view_beats = (clip.length_beats + 2.0 * beats_per_bar).max(min_view);
 
     ui.horizontal(|ui| {
         ui.label(format!("Editing: {}", clip.name));
         ui.weak(format!(
-            "{}/{} · {:.0} beats (+2 bars)",
+            "{}/{} · {:.0} beats visible",
             app.project.tempo.beats_per_bar,
             app.project.tempo.beat_unit,
             view_beats
@@ -49,9 +52,22 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
     let height = KEYS as f32 * KEY_H;
     let width = (view_beats as f32 * BEAT_W).max(beats_per_bar as f32 * 2.0 * BEAT_W);
 
-    egui::ScrollArea::both().show(ui, |ui| {
-        let (rect, resp) =
-            ui.allocate_exact_size(egui::vec2(width + 40.0, height), egui::Sense::click_and_drag());
+    // Solid bars reserve a gutter instead of floating/expanding over the
+    // bottom keys when you aim for the lowest pitches.
+    ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
+
+    // Don't let note-drag steal scroll-wheel panning; disable drag-to-scroll
+    // so LMB stays available for draw/move/resize.
+    egui::ScrollArea::both()
+        .auto_shrink([false, false])
+        .drag_to_scroll(false)
+        .show(ui, |ui| {
+            // allocate_exact_size expands ScrollArea content without bubbling a
+            // huge min-size up to the window (which was shoving the UI off-screen).
+            let (rect, resp) = ui.allocate_exact_size(
+                egui::vec2(width + 40.0, height),
+                egui::Sense::click_and_drag(),
+            );
         let painter = ui.painter_at(rect);
         let grid =
             egui::Rect::from_min_size(rect.min + egui::vec2(40.0, 0.0), egui::vec2(width, height));

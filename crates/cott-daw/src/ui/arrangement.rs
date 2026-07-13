@@ -4,15 +4,34 @@ use cott_core::commands::Command;
 use cott_core::graph::NodeKind;
 use eframe::egui;
 
+/// How long the arrangement timeline should be, in beats.
+/// Grows with project content; always at least 32 bars so the ruler isn't tiny.
+pub fn timeline_length_beats(app: &CottApp) -> f64 {
+    let bar = app.project.tempo.bar_length_beats().max(1.0);
+    let min_beats = 32.0 * bar;
+    let content_end = app
+        .project
+        .clips
+        .iter()
+        .map(|c| c.end_beats())
+        .fold(0.0_f64, f64::max);
+    let playhead = app.playhead_beats();
+    // Eight bars of padding past the last clip / playhead.
+    (content_end + 8.0 * bar)
+        .max(playhead + 4.0 * bar)
+        .max(min_beats)
+}
+
 pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
     let track_header_w = 160.0;
     let beat_px = 1.0 / app.ui.beats_per_pixel.max(0.001);
     let beats_per_bar = app.project.tempo.bar_length_beats();
     let beats_per_bar_i = beats_per_bar.round().max(1.0) as i32;
-    // Sixteen bars of the current time signature.
-    let total_beats = (16.0 * beats_per_bar) as f32;
+    let total_beats = timeline_length_beats(app) as f32;
     let timeline_w = total_beats * beat_px;
+    // Inclusive end beat for grid lines; bar *labels* stop before this (see ruler).
     let beat_limit = total_beats.ceil() as i32;
+    let bar_count = (total_beats / beats_per_bar as f32).floor().max(1.0) as i32;
     const CLIP_QUANTIZE: f64 = 0.25;
 
     // Commit clip move/resize when the mouse is released.
@@ -49,24 +68,29 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
         if scroll != 0.0 {
             app.ui.scroll_x = (app.ui.scroll_x - scroll).max(0.0);
         }
+        let max_scroll = (timeline_w - rect.width()).max(0.0);
+        app.ui.scroll_x = app.ui.scroll_x.clamp(0.0, max_scroll);
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, 0.0, egui::Color32::from_rgb(40, 42, 48));
-        for b in 0..=beat_limit {
-            if b % beats_per_bar_i == 0 {
-                let x = rect.left() + b as f32 * beat_px - app.ui.scroll_x;
-                if x >= rect.left() && x <= rect.right() {
-                    painter.line_segment(
-                        [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
-                        egui::Stroke::new(1.0, egui::Color32::GRAY),
-                    );
-                    painter.text(
-                        egui::pos2(x + 2.0, rect.top()),
-                        egui::Align2::LEFT_TOP,
-                        format!("{}", b / beats_per_bar_i + 1),
-                        egui::FontId::monospace(10.0),
-                        egui::Color32::LIGHT_GRAY,
-                    );
-                }
+        // Bar ticks + labels 1..=bar_count (no phantom label on the final edge).
+        for bar in 0..=bar_count {
+            let b = bar * beats_per_bar_i;
+            let x = rect.left() + b as f32 * beat_px - app.ui.scroll_x;
+            if x < rect.left() - 1.0 || x > rect.right() + 1.0 {
+                continue;
+            }
+            painter.line_segment(
+                [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
+                egui::Stroke::new(1.0, egui::Color32::GRAY),
+            );
+            if bar < bar_count {
+                painter.text(
+                    egui::pos2(x + 2.0, rect.top()),
+                    egui::Align2::LEFT_TOP,
+                    format!("{}", bar + 1),
+                    egui::FontId::monospace(10.0),
+                    egui::Color32::LIGHT_GRAY,
+                );
             }
         }
         // Playhead
@@ -99,11 +123,14 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
         let tracks: Vec<_> = app.project.tracks.iter().cloned().collect();
         for track in tracks {
             ui.horizontal(|ui| {
-                // Track header / mixer strip
-                ui.allocate_ui_with_layout(
+                // Fixed width matching the ruler spacer — shrink-wrapping here was what
+                // made bar numbers drift relative to the lane grid.
+                let header = ui.allocate_ui_with_layout(
                     egui::vec2(track_header_w, track.height),
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
+                        ui.set_min_width(track_header_w);
+                        ui.set_max_width(track_header_w);
                         let selected = app.ui.selected_track == Some(track.id);
                         let fill = if selected {
                             egui::Color32::from_rgb(55, 70, 90)
@@ -176,7 +203,6 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
                                     let bar = app.project.tempo.bar_length_beats();
                                     let clip = match track.kind {
                                         TrackKind::Midi => {
-                                            // One bar of the current time signature.
                                             Clip::new_midi(track.id, "Clip", start, bar)
                                         }
                                         TrackKind::Audio => {
@@ -189,12 +215,15 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
                                     app.sync_engine();
                                 }
                             });
+                        // Pin width even if controls are narrower than the strip.
+                        ui.expand_to_include_x(ui.min_rect().left() + track_header_w);
                     },
                 );
+                let row_h = header.response.rect.height().max(track.height);
 
-                // Lane
+                // Lane — height matches header so the row stays aligned.
                 let (rect, resp) = ui.allocate_exact_size(
-                    egui::vec2(timeline_w.min(ui.available_width()), track.height),
+                    egui::vec2(timeline_w.min(ui.available_width()), row_h),
                     egui::Sense::click_and_drag(),
                 );
                 let painter = ui.painter_at(rect);
@@ -267,7 +296,7 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
                     let w = draw_len as f32 * beat_px;
                     let clip_rect = egui::Rect::from_min_size(
                         egui::pos2(x0, rect.top() + 4.0),
-                        egui::vec2(w.max(4.0), track.height - 8.0),
+                        egui::vec2(w.max(4.0), (rect.height() - 8.0).max(4.0)),
                     );
                     let color =
                         egui::Color32::from_rgb(clip.color[0], clip.color[1], clip.color[2]);
