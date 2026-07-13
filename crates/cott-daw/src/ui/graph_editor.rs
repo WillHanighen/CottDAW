@@ -11,8 +11,8 @@ const MIN_ZOOM: f32 = 0.25;
 const MAX_ZOOM: f32 = 4.0;
 const MIN_ZOOM_PCT: i32 = 25;
 const MAX_ZOOM_PCT: i32 = 400;
-/// Scroll-wheel zoom step (percent). Always lands on a multiple of 2.
-const SCROLL_ZOOM_STEP_PCT: i32 = 2;
+/// Scroll-wheel zoom step (percent). Always lands on a multiple of this step.
+const SCROLL_ZOOM_STEP_PCT: i32 = 6;
 /// Toolbar +/- zoom step (percent). Always lands on a multiple of 5.
 const BUTTON_ZOOM_STEP_PCT: i32 = 5;
 
