@@ -1,7 +1,7 @@
 //! Versioned project document and asset registry.
 
 use crate::automation::AutomationLane;
-use crate::clips::{Clip, Track, TrackKind};
+use crate::clips::{Clip, ClipContent, Track, TrackKind};
 use crate::graph::{AudioGraph, CompiledPlan, GraphNode, NodeKind};
 use crate::ids::{AssetId, NodeId, PluginInstanceId, TrackId};
 use crate::time::{TempoMap, TransportState};
@@ -110,6 +110,25 @@ impl Project {
 
     pub fn touch(&mut self) {
         self.meta.modified_unix_ms = unix_ms();
+    }
+
+    /// Suggested arrangement loop end with half a bar of tail after content.
+    ///
+    /// MIDI clips use their last note rather than the clip boundary so trailing
+    /// editable space does not create a long silent section in the loop.
+    pub fn suggested_loop_end_beats(&self) -> f64 {
+        let content_end = self
+            .clips
+            .iter()
+            .filter_map(|clip| match &clip.content {
+                ClipContent::Midi { notes } => notes
+                    .iter()
+                    .map(|note| clip.start_beats + note.end_beats())
+                    .reduce(f64::max),
+                ClipContent::Audio { .. } => Some(clip.end_beats()),
+            })
+            .fold(self.loop_start_beats, f64::max);
+        content_end + self.tempo.bar_length_beats() * 0.5
     }
 
     pub fn add_midi_track(&mut self, name: impl Into<String>) -> TrackId {
@@ -382,6 +401,19 @@ mod tests {
         assert_eq!(loaded.tracks.len(), 2);
         assert_eq!(loaded.meta.name, "Test");
         assert!(!loaded.graph.nodes.is_empty());
+    }
+
+    #[test]
+    fn suggested_loop_end_is_half_bar_after_last_note() {
+        let mut project = Project::new("Loop");
+        let track = project.add_midi_track("Synth");
+        let mut clip = Clip::new_midi(track, "Clip", 0.0, 16.0);
+        clip.notes_mut()
+            .unwrap()
+            .push(crate::clips::MidiNote::new(60, 100, 5.0, 1.0));
+        project.clips.push(clip);
+
+        assert_eq!(project.suggested_loop_end_beats(), 8.0);
     }
 
     #[test]

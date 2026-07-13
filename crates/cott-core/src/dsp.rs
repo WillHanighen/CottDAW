@@ -642,6 +642,94 @@ mod tests {
     }
 
     #[test]
+    fn instrument_effect_chain_reaches_master() {
+        struct ChainHost {
+            instrument_calls: usize,
+            effect_calls: usize,
+        }
+
+        impl PluginAudioHost for ChainHost {
+            fn process_instrument(
+                &mut self,
+                _instance: crate::ids::PluginInstanceId,
+                _midi: &[ScheduledMidiEvent],
+                output: &mut AudioBuffer,
+                _ctx: &TransportBlockInfo,
+            ) -> bool {
+                self.instrument_calls += 1;
+                for channel in &mut output.channels {
+                    channel.fill(0.25);
+                }
+                true
+            }
+
+            fn process_effect(
+                &mut self,
+                _instance: crate::ids::PluginInstanceId,
+                input: &AudioBuffer,
+                output: &mut AudioBuffer,
+                _ctx: &TransportBlockInfo,
+            ) -> bool {
+                self.effect_calls += 1;
+                *output = input.clone();
+                output.apply_gain(2.0);
+                true
+            }
+        }
+
+        let mut project = Project::new("chain");
+        let track = project.add_midi_track("MIDI");
+        let (instrument, _) = project
+            .attach_instrument(
+                track,
+                "instrument".into(),
+                "/instrument.vst3".into(),
+                "Instrument".into(),
+            )
+            .unwrap();
+        let gain = project.tracks.iter()
+            .find(|candidate| candidate.id == track)
+            .and_then(|track| track.gain_node)
+            .unwrap();
+        let effect = project.add_effect(
+            "effect".into(),
+            "/effect.vst3".into(),
+            "Effect".into(),
+            [0.0, 0.0],
+        );
+        project.graph.edges.retain(
+            |_, edge| !(edge.from_node == instrument && edge.to_node == gain)
+        );
+        project.graph.connect_stereo(instrument, effect).unwrap();
+        project.graph.connect_stereo(effect, gain).unwrap();
+
+        let plan = project.compiled_plan();
+        let cache = SampleCache::default();
+        let mut host = ChainHost { instrument_calls: 0, effect_calls: 0 };
+        let mut meters = IndexMap::new();
+        let mut pdc_state = IndexMap::new();
+        let mut ctx = ProcessContext {
+            sample_rate: 48_000,
+            block_start: SamplePos(0),
+            block_len: 128,
+            tempo: &project.tempo,
+            transport: TransportState::Playing,
+            clips: &project.clips,
+            sample_cache: &cache,
+            automation: &project.automation,
+            plugin_audio: &mut host,
+            preview_midi: &[],
+            pdc_state: &mut pdc_state,
+        };
+
+        let out = process_block(&plan, &mut ctx, &mut meters);
+
+        assert_eq!(host.instrument_calls, 1);
+        assert_eq!(host.effect_calls, 1);
+        assert!(out.peak() > 0.3);
+    }
+
+    #[test]
     fn fan_in_sums() {
         let mut g = AudioGraph::new();
         let a = g.add_node(GraphNode::audio_clip_source(TrackId::new(), "A"));

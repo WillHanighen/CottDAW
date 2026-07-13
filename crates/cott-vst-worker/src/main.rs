@@ -24,6 +24,9 @@ fn main() {
             tracing_subscriber::EnvFilter::from_default_env()
                 .add_directive("cott_vst_worker=info".parse().unwrap()),
         )
+        // The host captures stderr through a pipe and re-emits each line.
+        // ANSI escapes would be rendered as literal `\x1b[` sequences there.
+        .with_ansi(false)
         .with_writer(std::io::stderr)
         .init();
 
@@ -207,6 +210,9 @@ fn handle_message(
         }
         HostToWorker::ProcessNotify { transport }
         | HostToWorker::OfflineProcess { transport, .. } => {
+            // Capture the request identity so a late completion cannot be
+            // mistaken for a newer shared-memory block.
+            let requested_sequence = shm.header().host_seq;
             let ok = if let Some(plugin) = backend.as_mut() {
                 plugin.process(shm, &transport)
             } else {
@@ -222,7 +228,7 @@ fn handle_message(
             let latency = backend.as_ref().map(|p| p.latency()).unwrap_or(0);
             {
                 let header = shm.header_mut();
-                header.worker_seq = header.host_seq;
+                header.worker_seq = requested_sequence;
                 header.flags |= cott_ipc::ShmFlags::PROCESS_DONE.bits();
                 if !ok {
                     header.flags |= cott_ipc::ShmFlags::WORKER_FAILED.bits();
@@ -231,6 +237,7 @@ fn handle_message(
             send(
                 stream,
                 &WorkerToHost::ProcessDone {
+                    sequence: requested_sequence,
                     latency,
                     ok,
                     message: None,

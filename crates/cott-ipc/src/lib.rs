@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use thiserror::Error;
 use uuid::Uuid;
 
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 pub const MAX_BLOCK_FRAMES: usize = 4096;
 pub const MAX_CHANNELS: usize = 2;
 pub const MAX_MIDI_EVENTS: usize = 512;
@@ -126,6 +126,7 @@ pub enum WorkerToHost {
         data: Vec<u8>,
     },
     ProcessDone {
+        sequence: u64,
         latency: u32,
         ok: bool,
         message: Option<String>,

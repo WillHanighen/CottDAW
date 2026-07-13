@@ -5,6 +5,7 @@ use indexmap::IndexMap;
 use petgraph::algo::{is_cyclic_directed, toposort};
 use petgraph::graph::{DiGraph, NodeIndex};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -476,7 +477,30 @@ impl CompiledPlan {
     pub fn compile(graph: &AudioGraph) -> Result<Self, GraphError> {
         let mut graph = graph.clone();
         let total_latency = graph.compute_latencies();
-        let order = graph.topological_order()?;
+        let mut order = graph.topological_order()?;
+
+        // Floating plugins must not consume a worker round-trip every block.
+        // Schedule only nodes that can contribute to a master output.
+        let mut active = HashSet::new();
+        let mut pending: Vec<NodeId> = graph
+            .nodes
+            .iter()
+            .filter_map(|(id, node)| matches!(node.kind, NodeKind::MasterOutput).then_some(*id))
+            .collect();
+        while let Some(node_id) = pending.pop() {
+            if !active.insert(node_id) {
+                continue;
+            }
+            pending.extend(
+                graph
+                    .edges
+                    .values()
+                    .filter(|edge| edge.to_node == node_id)
+                    .map(|edge| edge.from_node),
+            );
+        }
+        order.retain(|id| active.contains(id));
+
         let mut arrival: IndexMap<NodeId, u32> = IndexMap::new();
         for node_id in &order {
             let mut input_latency = 0u32;
@@ -494,8 +518,38 @@ impl CompiledPlan {
             arrival.insert(*node_id, input_latency.saturating_add(node_latency));
         }
         let mut delay_compensation = IndexMap::new();
-        for (id, arrived) in &arrival {
-            delay_compensation.insert(*id, total_latency.saturating_sub(*arrived));
+        for id in &order {
+            delay_compensation.insert(*id, 0);
+        }
+        // PDC aligns sibling audio branches at each fan-in. Applying the
+        // graph's total latency to every early node also delays serial chains
+        // repeatedly (instrument -> effect -> gain), which is incorrect.
+        for destination in &order {
+            let incoming: Vec<NodeId> = graph
+                .edges
+                .values()
+                .filter(|edge| {
+                    edge.to_node == *destination
+                        && graph
+                            .nodes
+                            .get(&edge.from_node)
+                            .and_then(|node| node.find_port(edge.from_port))
+                            .is_some_and(|port| port.port_type == PortType::Audio)
+                })
+                .map(|edge| edge.from_node)
+                .collect();
+            let max_arrival = incoming
+                .iter()
+                .filter_map(|id| arrival.get(id))
+                .copied()
+                .max()
+                .unwrap_or(0);
+            for source in incoming {
+                let delay = max_arrival.saturating_sub(arrival.get(&source).copied().unwrap_or(0));
+                if let Some(current) = delay_compensation.get_mut(&source) {
+                    *current = (*current).max(delay);
+                }
+            }
         }
         Ok(Self {
             order,
@@ -569,6 +623,28 @@ mod tests {
         g.connect_stereo(b, c).unwrap();
         let plan = CompiledPlan::compile(&g).unwrap();
         assert_eq!(plan.total_latency, 128);
+        assert_eq!(plan.delay_compensation[&a], 0);
+        assert_eq!(plan.delay_compensation[&b], 0);
         assert_eq!(plan.delay_compensation[&c], 0);
+    }
+
+    #[test]
+    fn disconnected_plugins_are_not_scheduled() {
+        let mut g = AudioGraph::new();
+        let source = g.add_node(GraphNode::audio_clip_source(TrackId::new(), "Clip"));
+        let master = g.add_node(GraphNode::master_output());
+        let floating = g.add_node(GraphNode::vst3_effect(
+            PluginInstanceId::new(),
+            "effect".into(),
+            "/effect.vst3".into(),
+            "Floating effect".into(),
+        ));
+        g.connect_stereo(source, master).unwrap();
+
+        let plan = CompiledPlan::compile(&g).unwrap();
+
+        assert!(plan.order.contains(&source));
+        assert!(plan.order.contains(&master));
+        assert!(!plan.order.contains(&floating));
     }
 }

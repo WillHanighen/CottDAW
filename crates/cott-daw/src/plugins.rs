@@ -24,7 +24,6 @@ pub struct PluginInstance {
     pub uid: String,
     pub path: PathBuf,
     pub name: String,
-    pub is_instrument: bool,
     pub has_editor: bool,
     pub params: Vec<ParamInfo>,
     pub param_values: IndexMap<u32, f32>,
@@ -190,14 +189,14 @@ impl PluginHost {
             },
         )?;
         let msg = recv_timeout(&mut stream, Duration::from_secs(30))?;
-        let (name, latency, params, has_editor, is_instrument) = match msg {
+        let (name, latency, params, has_editor) = match msg {
             WorkerToHost::Loaded {
                 name,
                 latency,
                 params,
                 has_editor,
-                is_instrument,
-            } => (name, latency, params, has_editor, is_instrument),
+                ..
+            } => (name, latency, params, has_editor),
             WorkerToHost::LoadFailed { message } => {
                 let _ = child;
                 return Err(anyhow!("load failed: {message}"));
@@ -217,7 +216,6 @@ impl PluginHost {
                 uid: uid.to_string(),
                 path: path.to_path_buf(),
                 name,
-                is_instrument,
                 has_editor,
                 params,
                 param_values,
@@ -324,7 +322,7 @@ impl PluginInstance {
         ctx: &TransportBlockInfo,
     ) -> bool {
         if self.failed {
-            output.clear();
+            render_fallback(input, output);
             return false;
         }
         // Check if child still alive.
@@ -333,13 +331,13 @@ impl PluginInstance {
                 Ok(Some(status)) => {
                     self.failed = true;
                     self.fail_message = Some(format!("worker exited: {status}"));
-                    output.clear();
+                    render_fallback(input, output);
                     return false;
                 }
                 Err(e) => {
                     self.failed = true;
                     self.fail_message = Some(format!("worker wait error: {e}"));
-                    output.clear();
+                    render_fallback(input, output);
                     return false;
                 }
                 Ok(None) => {}
@@ -347,11 +345,13 @@ impl PluginInstance {
         }
 
         let Some(shm) = self.shm.as_mut() else {
-            output.clear();
+            render_fallback(input, output);
             return false;
         };
-        let frames = ctx.block_len as usize;
-        {
+        let frames = (ctx.block_len as usize)
+            .min(output.frames())
+            .min(cott_ipc::MAX_BLOCK_FRAMES);
+        let expected_sequence = {
             let header = shm.header_mut();
             header.frames = frames as u32;
             header.channels_in = 2;
@@ -359,7 +359,8 @@ impl PluginInstance {
             header.midi_count = midi.len().min(cott_ipc::MAX_MIDI_EVENTS) as u32;
             header.host_seq = header.host_seq.wrapping_add(1);
             header.flags = ShmFlags::REQUEST_PROCESS.bits();
-        }
+            header.host_seq
+        };
         {
             let midi_buf = shm.midi_mut();
             for (i, ev) in midi.iter().take(cott_ipc::MAX_MIDI_EVENTS).enumerate() {
@@ -390,46 +391,46 @@ impl PluginInstance {
             project_time_samples: ctx.block_start.0,
             playing: ctx.playing,
             cycle: false,
-            block_size: ctx.block_len,
+            block_size: frames as u32,
         };
 
-        if let Some(stream) = self.stream.as_mut() {
-            if send(stream, &HostToWorker::ProcessNotify { transport }).is_err() {
-                self.failed = true;
-                self.fail_message = Some("IPC send failed".into());
-                output.clear();
-                return false;
-            }
-            match recv_timeout(stream, Duration::from_millis(50)) {
-                Ok(WorkerToHost::ProcessDone {
-                    latency,
-                    ok,
-                    message,
-                }) => {
-                    self.latency = latency;
-                    if !ok {
-                        self.failed = true;
-                        self.fail_message = message;
-                        if self.is_instrument {
-                            output.clear();
-                        } else if let Some(input) = input {
-                            *output = input.clone();
-                        }
-                        return false;
-                    }
-                }
-                Ok(_) => {}
-                Err(_) => {
-                    // Timeout — treat as failure for this block but don't mark permanently yet.
-                    warn!("plugin {} process timeout", self.name);
-                    if self.is_instrument {
-                        output.clear();
-                    } else if let Some(input) = input {
-                        *output = input.clone();
-                    }
+        let Some(stream) = self.stream.as_mut() else {
+            render_fallback(input, output);
+            return false;
+        };
+        if send(stream, &HostToWorker::ProcessNotify { transport }).is_err() {
+            self.failed = true;
+            self.fail_message = Some("IPC send failed".into());
+            render_fallback(input, output);
+            return false;
+        }
+        match recv_process_done(stream, expected_sequence, Duration::from_millis(50)) {
+            Ok((latency, ok, message)) => {
+                self.latency = latency;
+                if !ok {
+                    self.failed = true;
+                    self.fail_message = message;
+                    render_fallback(input, output);
                     return false;
                 }
             }
+            Err(e) => {
+                // Timeout — treat as failure for this block but don't mark permanently yet.
+                warn!("plugin {} process failed: {e}", self.name);
+                render_fallback(input, output);
+                return false;
+            }
+        }
+
+        let completion = shm.header();
+        let flags = ShmFlags::from_bits_truncate(completion.flags);
+        if completion.worker_seq != expected_sequence || !flags.contains(ShmFlags::PROCESS_DONE) {
+            warn!(
+                "plugin {} stale process result: expected sequence {}, got {}",
+                self.name, expected_sequence, completion.worker_seq
+            );
+            render_fallback(input, output);
+            return false;
         }
 
         {
@@ -444,6 +445,14 @@ impl PluginInstance {
             }
         }
         true
+    }
+}
+
+fn render_fallback(input: Option<&AudioBuffer>, output: &mut AudioBuffer) {
+    if let Some(input) = input {
+        *output = input.clone();
+    } else {
+        output.clear();
     }
 }
 
@@ -541,11 +550,67 @@ fn wait_hello(stream: &mut UnixStream) -> Result<()> {
     match recv_timeout(stream, Duration::from_secs(5))? {
         WorkerToHost::HelloAck { version } => {
             if version != PROTOCOL_VERSION {
-                warn!("worker protocol {version}");
+                return Err(anyhow!(
+                    "worker protocol mismatch: host {}, worker {version}",
+                    PROTOCOL_VERSION
+                ));
             }
             Ok(())
         }
         other => Err(anyhow!("expected hello, got {other:?}")),
+    }
+}
+
+/// Wait for the completion matching this shared-memory generation.
+///
+/// A worker may finish a timed-out request after the host has submitted the
+/// next block. Drain those stale notifications without discarding a newer
+/// frame that arrived in the same socket read.
+fn recv_process_done(
+    stream: &mut UnixStream,
+    expected_sequence: u64,
+    timeout: Duration,
+) -> Result<(u32, bool, Option<String>)> {
+    let mut buf = Vec::new();
+    let mut tmp = [0u8; 65536];
+    let start = Instant::now();
+
+    loop {
+        while let Some(message) = try_decode_message::<WorkerToHost>(&mut buf)? {
+            match message {
+                WorkerToHost::ProcessDone {
+                    sequence,
+                    latency,
+                    ok,
+                    message,
+                } if sequence == expected_sequence => return Ok((latency, ok, message)),
+                WorkerToHost::ProcessDone { .. } => {
+                    // Completion for a request that already timed out.
+                }
+                other => warn!("unexpected plugin process response: {other:?}"),
+            }
+        }
+
+        let Some(remaining) = timeout.checked_sub(start.elapsed()) else {
+            return Err(anyhow!("timeout"));
+        };
+        if remaining.is_zero() {
+            return Err(anyhow!("timeout"));
+        }
+        stream.set_read_timeout(Some(remaining))?;
+
+        match stream.read(&mut tmp) {
+            Ok(0) => return Err(anyhow!("worker disconnected")),
+            Ok(n) => buf.extend_from_slice(&tmp[..n]),
+            Err(e)
+                if e.kind() == std::io::ErrorKind::WouldBlock
+                    || e.kind() == std::io::ErrorKind::TimedOut =>
+            {
+                return Err(anyhow!("timeout"));
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(e.into()),
+        }
     }
 }
 
@@ -573,6 +638,34 @@ fn recv_timeout(stream: &mut UnixStream, timeout: Duration) -> Result<WorkerToHo
             }
             Err(e) => return Err(e.into()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn process_receive_drains_stale_completion_from_same_read() {
+        let (mut host, mut worker) = UnixStream::pair().unwrap();
+        let stale = WorkerToHost::ProcessDone {
+            sequence: 41,
+            latency: 0,
+            ok: true,
+            message: None,
+        };
+        let current = WorkerToHost::ProcessDone {
+            sequence: 42,
+            latency: 128,
+            ok: true,
+            message: None,
+        };
+        let mut bytes = encode_message(&stale).unwrap();
+        bytes.extend(encode_message(&current).unwrap());
+        worker.write_all(&bytes).unwrap();
+
+        let result = recv_process_done(&mut host, 42, Duration::from_millis(100)).unwrap();
+        assert_eq!(result, (128, true, None));
     }
 }
 

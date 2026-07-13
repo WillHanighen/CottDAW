@@ -462,7 +462,11 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
         .ctx()
         .data(|data| data.get_temp(canvas_id.with("context_edge")))
         .flatten();
-    let plugins = app.plugin_host.lock().catalog.clone();
+    let plugins = app
+        .plugin_host
+        .try_lock()
+        .map(|host| host.catalog.clone())
+        .unwrap_or_default();
     let mut action = None;
 
     resp.context_menu(|ui| {

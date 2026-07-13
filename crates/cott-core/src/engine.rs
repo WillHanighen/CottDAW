@@ -238,9 +238,8 @@ impl AudioProcessor {
         while let Ok(cmd) = rx.pop() {
             match cmd {
                 EngineCommand::SetPlan(plan) => {
-                    // Drop PDC state for removed nodes; keep rings for survivors.
-                    self.pdc_state
-                        .retain(|id, _| plan.nodes.contains_key(id));
+                    // Existing delay rings encode the old plan's latency.
+                    self.pdc_state.clear();
                     self.plan = plan;
                 }
                 EngineCommand::SetTransport(state) => {

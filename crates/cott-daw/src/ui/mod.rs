@@ -255,18 +255,24 @@ fn draw_browser(app: &mut CottApp, ui: &mut egui::Ui) {
     ui.label("Instruments / Effects");
     egui::ScrollArea::vertical().show(ui, |ui| {
         let filter = app.ui.plugin_filter.to_lowercase();
-        let catalog: Vec<_> = app
-            .plugin_host
-            .lock()
-            .catalog
-            .iter()
-            .filter(|p| {
-                filter.is_empty()
-                    || p.name.to_lowercase().contains(&filter)
-                    || p.vendor.to_lowercase().contains(&filter)
-            })
-            .cloned()
-            .collect();
+        let (catalog, catalog_is_empty): (Vec<_>, bool) =
+            if let Some(host) = app.plugin_host.try_lock() {
+                let is_empty = host.catalog.is_empty();
+                let filtered = host
+                    .catalog
+                    .iter()
+                    .filter(|p| {
+                        filter.is_empty()
+                            || p.name.to_lowercase().contains(&filter)
+                            || p.vendor.to_lowercase().contains(&filter)
+                    })
+                    .cloned()
+                    .collect();
+                (filtered, is_empty)
+            } else {
+                // Audio processing owns the host; retry on the next UI frame.
+                (Vec::new(), false)
+            };
         if catalog.is_empty() && app.is_scanning_plugins() {
             ui.weak("Building plugin list…");
         }
@@ -301,7 +307,7 @@ fn draw_browser(app: &mut CottApp, ui: &mut egui::Ui) {
                 }
             }
         }
-        if app.plugin_host.lock().catalog.is_empty() && !app.is_scanning_plugins() {
+        if catalog_is_empty && !app.is_scanning_plugins() {
             ui.weak("No plugins found. Install VST3s in ~/.vst3");
         }
     });
@@ -462,17 +468,17 @@ fn draw_plugin_inspector(app: &mut CottApp, ui: &mut egui::Ui) {
     ui.label("Generic parameters");
     let params = app
         .plugin_host
-        .lock()
-        .instances
-        .get(&instance_id)
-        .map(|i| {
-            i.params
-                .iter()
-                .map(|p| {
-                    let v = i.param_values.get(&p.id).copied().unwrap_or(p.default);
-                    (p.id, p.name.clone(), p.min, p.max, v)
-                })
-                .collect::<Vec<_>>()
+        .try_lock()
+        .and_then(|host| {
+            host.instances.get(&instance_id).map(|i| {
+                i.params
+                    .iter()
+                    .map(|p| {
+                        let v = i.param_values.get(&p.id).copied().unwrap_or(p.default);
+                        (p.id, p.name.clone(), p.min, p.max, v)
+                    })
+                    .collect::<Vec<_>>()
+            })
         })
         .unwrap_or_default();
 

@@ -284,7 +284,9 @@ pub fn schedule_midi_for_block(
 
     for clip in clips.iter().filter(|c| c.track_id == track_id) {
         let Some(notes) = clip.notes() else { continue };
-        if clip.end_beats() <= start_beat || clip.start_beats >= end_beat {
+        // Keep the block starting exactly at the clip end: a note that reaches
+        // the clip boundary emits its note-off at offset zero in that block.
+        if clip.end_beats() < start_beat || clip.start_beats >= end_beat {
             continue;
         }
         for note in notes {
@@ -358,6 +360,22 @@ mod tests {
         assert!(b1.is_empty());
         assert_eq!(b3.iter().filter(|e| is_on(e)).count(), 0);
         assert_eq!(b3.iter().filter(|e| is_off(e)).count(), 1);
+    }
+
+    #[test]
+    fn note_ending_at_clip_boundary_emits_off_in_next_block() {
+        let track = TrackId::new();
+        let mut clip = Clip::new_midi(track, "Clip", 0.0, 4.0);
+        clip.notes_mut()
+            .unwrap()
+            .push(MidiNote::new(60, 100, 3.0, 1.0));
+        let tempo = TempoMap::default();
+        let clip_end = tempo.beat_to_sample(BeatPos(4.0));
+
+        let events = schedule_midi_for_block(&[clip], track, &tempo, clip_end, 256);
+        assert!(events
+            .iter()
+            .any(|e| e.status & 0xf0 == 0x80 && e.data1 == 60));
     }
 
     #[test]

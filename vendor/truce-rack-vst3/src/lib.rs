@@ -40,10 +40,11 @@ use std::path::{Path, PathBuf};
 use std::ptr;
 
 use vst3::Steinberg::Vst::{
-    AudioBusBuffers, AudioBusBuffers__type0, Event, Event_::EventTypes_, Event__type0,
-    IAudioProcessor, IAudioProcessorTrait, IComponent, IComponentTrait, IConnectionPoint,
-    IConnectionPointTrait, IEditController, IEditControllerTrait, IEventList, IEventListTrait,
-    NoteOffEvent, NoteOnEvent, ParameterInfo as Vst3ParameterInfo,
+    AudioBusBuffers, AudioBusBuffers__type0, BusDirections_, Event, Event_::EventTypes_,
+    Event__type0, IAudioProcessor, IAudioProcessorTrait, IComponent, IComponentTrait,
+    IConnectionPoint, IConnectionPointTrait, IEditController, IEditControllerTrait, IEventList,
+    IEventListTrait, MediaTypes_, NoteOffEvent, NoteOnEvent,
+    ParameterInfo as Vst3ParameterInfo,
     ParameterInfo_::ParameterFlags_, PolyPressureEvent, ProcessContext as Vst3ProcessContext,
     ProcessContext_::StatesAndFlags_, ProcessData, ProcessModes_, ProcessSetup, String128,
     SymbolicSampleSizes_, ViewType,
@@ -959,6 +960,26 @@ impl PluginCore for Vst3Plugin {
             return Err(Error::Other(
                 "IAudioProcessor::setupProcessing failed".into(),
             ));
+        }
+        // VST3 buses are inactive by default. Some plugins happen to process
+        // without this host step, but conforming effects (including Surge XT)
+        // return silence until their main input/output buses are activated.
+        for direction in [BusDirections_::kInput, BusDirections_::kOutput] {
+            let direction = direction as i32;
+            let bus_count = unsafe {
+                self.component
+                    .getBusCount(MediaTypes_::kAudio as i32, direction)
+            };
+            if bus_count > 0
+                && unsafe {
+                    self.component
+                        .activateBus(MediaTypes_::kAudio as i32, direction, 0, 1)
+                } != kResultOk
+            {
+                return Err(Error::Other(format!(
+                    "IComponent::activateBus(audio, direction={direction}) failed"
+                )));
+            }
         }
         if unsafe { self.component.setActive(1) } != kResultOk {
             return Err(Error::Other("IComponent::setActive(true) failed".into()));

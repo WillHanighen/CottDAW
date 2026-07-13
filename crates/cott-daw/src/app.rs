@@ -155,6 +155,9 @@ impl CottApp {
     }
 
     pub fn sync_engine(&mut self) {
+        if self.project.loop_enabled {
+            self.project.loop_end_beats = self.project.suggested_loop_end_beats();
+        }
         if let Err(e) = self.project.try_compiled_plan() {
             self.status = format!("Graph compile error: {e}");
         }
@@ -169,7 +172,11 @@ impl CottApp {
 
     /// Mirror live plugin worker failure/latency into the project graph for UI/DSP.
     pub fn sync_plugin_runtime_state(&mut self) {
-        let host = self.plugin_host.lock();
+        // Never queue the UI behind realtime plugin processing. A queued UI
+        // lock can win the mutex at the next callback and drop an audio block.
+        let Some(host) = self.plugin_host.try_lock() else {
+            return;
+        };
         let mut dirty = false;
         for node in self.project.graph.nodes.values_mut() {
             let (instance_id, failed_flag) = match &mut node.kind {
