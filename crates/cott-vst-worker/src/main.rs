@@ -6,6 +6,7 @@
 mod classify;
 mod host;
 mod vst;
+mod vst2;
 mod x11_editor;
 
 use anyhow::{Context, Result};
@@ -69,7 +70,7 @@ fn run() -> Result<()> {
         },
     )?;
 
-    let mut backend: Option<vst::VstPlugin> = None;
+    let mut backend: Option<vst::PluginBackend> = None;
     let mut read_buf = Vec::new();
     let mut tmp = [0u8; 65536];
 
@@ -113,7 +114,7 @@ fn handle_message(
     msg: HostToWorker,
     stream: &mut UnixStream,
     shm: &mut SharedAudioRegion,
-    backend: &mut Option<vst::VstPlugin>,
+    backend: &mut Option<vst::PluginBackend>,
 ) -> Result<bool> {
     match msg {
         HostToWorker::Hello { version } => {
@@ -135,14 +136,22 @@ fn handle_message(
             send(stream, &WorkerToHost::ScanResult { plugins })?;
         }
         HostToWorker::Load {
+            format,
             path,
             uid,
             sample_rate,
             block_size,
             state,
         } => {
-            match vst::VstPlugin::load(&path, &uid, sample_rate, block_size, state.as_deref()) {
-                Ok(plugin) => {
+            match vst::PluginBackend::load(
+                format,
+                &path,
+                &uid,
+                sample_rate,
+                block_size,
+                state.as_deref(),
+            ) {
+                Ok(mut plugin) => {
                     let (name, latency, params, has_editor, is_instrument) = plugin.meta();
                     *backend = Some(plugin);
                     send(
@@ -169,9 +178,13 @@ fn handle_message(
         HostToWorker::Unload => {
             *backend = None;
         }
-        HostToWorker::SetParam { id, value } => {
+        HostToWorker::SetParam {
+            id,
+            value,
+            normalized,
+        } => {
             if let Some(plugin) = backend {
-                plugin.set_param(id, value);
+                plugin.set_param(id, value, normalized);
             }
         }
         HostToWorker::GetParams => {

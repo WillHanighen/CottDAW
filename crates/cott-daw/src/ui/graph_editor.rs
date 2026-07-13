@@ -120,11 +120,7 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
         let step_dir = ui.input(|i| {
             let raw = i.raw_scroll_delta.y;
             if raw.abs() > f32::EPSILON {
-                if raw > 0.0 {
-                    1
-                } else {
-                    -1
-                }
+                if raw > 0.0 { 1 } else { -1 }
             } else {
                 // Pinch-to-zoom only (ignore tiny scroll-derived zoom deltas).
                 let pinch = i.zoom_delta();
@@ -280,10 +276,7 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
 
         let port_r = (5.0 * zoom).clamp(3.0, 12.0);
         for (i, port) in node.inputs.iter().enumerate() {
-            let p = world_to_screen(
-                node.position[0],
-                node.position[1] + 28.0 + i as f32 * 14.0,
-            );
+            let p = world_to_screen(node.position[0], node.position[1] + 28.0 + i as f32 * 14.0);
             port_positions.insert((node_id, port.id), p);
             let color = match port.port_type {
                 PortType::Midi => egui::Color32::from_rgb(220, 180, 80),
@@ -394,10 +387,11 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
                     {
                         Ok(edge_id) => {
                             let edge = app.project.graph.edges[&edge_id].clone();
-                            app.commands.record(cott_core::commands::Command::ConnectReplace {
-                                edge,
-                                replaced,
-                            });
+                            app.commands
+                                .record(cott_core::commands::Command::ConnectReplace {
+                                    edge,
+                                    replaced,
+                                });
                             app.status = "Connected".into();
                             app.sync_engine();
                         }
@@ -487,8 +481,8 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
             if app.can_remove_graph_node(node_id) {
                 let delete_label = match app.project.graph.nodes.get(&node_id).map(|n| &n.kind) {
                     Some(
-                        cott_core::graph::NodeKind::Vst3Effect { .. }
-                        | cott_core::graph::NodeKind::Vst3Instrument { .. },
+                        cott_core::graph::NodeKind::PluginEffect { .. }
+                        | cott_core::graph::NodeKind::PluginInstrument { .. },
                     ) => "Delete plugin / FX",
                     _ => "Delete node",
                 };
@@ -517,7 +511,10 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
             let mut found = false;
             for plugin in plugins.iter().filter(|plugin| plugin.is_instrument) {
                 found = true;
-                if ui.button(&plugin.name).clicked() {
+                if ui
+                    .button(format!("{} [{}]", plugin.name, plugin.format))
+                    .clicked()
+                {
                     action = Some(ContextAction::Add(AddNodeAction::Instrument(
                         plugin.clone(),
                     )));
@@ -532,7 +529,10 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
             let mut found = false;
             for plugin in plugins.iter().filter(|plugin| plugin.is_effect) {
                 found = true;
-                if ui.button(&plugin.name).clicked() {
+                if ui
+                    .button(format!("{} [{}]", plugin.name, plugin.format))
+                    .clicked()
+                {
                     action = Some(ContextAction::Add(AddNodeAction::Effect(plugin.clone())));
                     ui.close_menu();
                 }
@@ -568,6 +568,7 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
         }
         Some(ContextAction::Add(AddNodeAction::Instrument(plugin))) => {
             app.load_instrument_on_selected_track(
+                plugin.format,
                 plugin.uid,
                 plugin.path,
                 plugin.name,
@@ -575,7 +576,13 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
             );
         }
         Some(ContextAction::Add(AddNodeAction::Effect(plugin))) => {
-            app.load_effect(plugin.uid, plugin.path, plugin.name, graph_position);
+            app.load_effect(
+                plugin.format,
+                plugin.uid,
+                plugin.path,
+                plugin.name,
+                graph_position,
+            );
         }
         Some(ContextAction::DeleteNode(node_id)) => {
             app.remove_graph_node(node_id);
@@ -656,8 +663,8 @@ fn node_has_plugin_editor(graph: &cott_core::graph::AudioGraph, node_id: NodeId)
     matches!(
         graph.nodes.get(&node_id).map(|n| &n.kind),
         Some(
-            cott_core::graph::NodeKind::Vst3Instrument { failed, .. }
-                | cott_core::graph::NodeKind::Vst3Effect { failed, .. }
+            cott_core::graph::NodeKind::PluginInstrument { failed, .. }
+                | cott_core::graph::NodeKind::PluginEffect { failed, .. }
         ) if !*failed
     )
 }

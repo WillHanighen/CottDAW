@@ -3,7 +3,7 @@ name = "cott-vst-worker"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Per-plugin sandboxed VST3 worker for CottDAW"
+description = "Per-plugin sandboxed VST2/VST3/CLAP/LV2 worker for CottDAW"
 
 [[bin]]
 name = "cott-vst-worker"
@@ -25,3 +25,6 @@ libloading = "0.8"
 vst3 = "0.3"
 tempfile = { workspace = true }
 x11-dl = { workspace = true }
+truce-rack-clap = "1.1.5"
+truce-rack-lv2 = "1.1.5"
+vst = { version = "0.4.0", features = ["disable_deprecation_warning"] }

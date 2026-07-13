@@ -3,7 +3,7 @@
 ## Goals
 
 - **Authoritative graph** — the routing editor mutates the same typed DAG the engine compiles; the UI is not a decoration.
-- **Crash isolation** — third-party VST3 code never loads in the GUI or audio process.
+- **Crash isolation** — third-party VST2/VST3/CLAP/LV2 code never loads in the GUI or audio process.
 - **Realtime-safe callback** — the audio thread processes a precompiled plan; graph edits compile off-thread and swap atomically.
 - **Acyclic signal flow** — feedback loops are rejected at connect time.
 
@@ -14,7 +14,7 @@ crates/
   cott-core/          Project model, graph, DSP, engine bridge, import/export
   cott-ipc/           Host ↔ worker protocol + POSIX shared-memory layout
   cott-daw/           egui app, cpal/PipeWire I/O, plugin host manager
-  cott-vst-worker/    Sandboxed VST3 process (load, process, X11 editor)
+  cott-vst-worker/    Sandboxed multi-format process (load, process, X11 editor)
 vendor/
   truce-rack-vst3/    Patched VST3 bindings (ModuleEntry before GetPluginFactory)
 ```
@@ -47,7 +47,7 @@ Workspace root patches `truce-rack-vst3` so Linux/yabridge chainloaders call `Mo
         ▼
 ┌───────────────────┐
 │ cott-vst-worker   │  × N instances
-│ truce-rack-vst3   │
+│ format backend     │
 │ optional X11 UI   │
 └───────────────────┘
 ```
@@ -58,7 +58,7 @@ Workspace root patches `truce-rack-vst3` so Linux/yabridge chainloaders call `Mo
 
 Holds tempo/transport, tracks, clips, `AudioGraph`, assets, automation lanes, and opaque plugin state blobs. Runtime-only `root_dir` is skipped by serde.
 
-**On-disk format (v1):** a directory with `project.json` (pretty JSON), `assets/`, and `plugins/`. Saves use `project.json.tmp` then atomic rename. Autosaves land under the OS data dir (`CottDAW/autosave/`).
+**On-disk format (v2):** a directory with `project.json` (pretty JSON), `assets/`, and `plugins/`. Plugin nodes persist their format, stable ID, path, and opaque state. Saves use `project.json.tmp` then atomic rename. Autosaves land under the OS data dir (`CottDAW/autosave/`).
 
 ### Tracks and clips
 
@@ -68,7 +68,7 @@ Holds tempo/transport, tracks, clips, `AudioGraph`, assets, automation lanes, an
 
 ### Graph (`graph.rs`)
 
-**Node kinds:** `MidiClipSource`, `AudioClipSource`, `GainPan`, `SumMixer`, `MasterOutput`, `Vst3Instrument`, `Vst3Effect`.
+**Node kinds:** `MidiClipSource`, `AudioClipSource`, `GainPan`, `SumMixer`, `MasterOutput`, `PluginInstrument`, `PluginEffect`.
 
 **Rules:**
 
@@ -111,7 +111,7 @@ Targets: `NodeGain`, `NodePan`, `PluginParam`. Points are beat + normalized valu
 
 `engine::render_offline` uses the same `process_block` path with `TransportState::Playing`. Export and tests share this code.
 
-## VST sandboxing
+## Plugin sandboxing
 
 ### Launch
 
@@ -123,7 +123,7 @@ Binary resolution: sibling of `cott-daw`, else `target/debug|release/cott-vst-wo
 
 ### Protocol (`cott-ipc`)
 
-Length-prefixed **bincode** messages. `PROTOCOL_VERSION = 1`.
+Length-prefixed **bincode** messages. `PROTOCOL_VERSION = 3`; each descriptor/load request carries `PluginFormat`.
 
 **Host → worker:** `Hello`, `ScanPaths`, `Load`, `Unload`, `SetParam`, `GetParams`, `GetState` / `SetState`, `OpenEditor` / `CloseEditor`, `ProcessNotify`, `OfflineProcess`, `Shutdown`.
 
@@ -139,11 +139,11 @@ Realtime handshake: host fills MIDI + audio + header → `ProcessNotify` → wor
 
 ### Scan
 
-Disposable worker scans standard VST3 dirs. yabridge bundles are listed from the filesystem without calling `ModuleEntry` (avoids Wine hangs during catalog build). Native plugins may use isolated temp-dir symlink scans.
+The disposable worker aggregates VST2, VST3, CLAP, and LV2 catalogs. It honors the standard paths, `VST_PATH`, `VST3_PATH`, `CLAP_PATH`, and Lilv/`LV2_PATH`. Yabridge VST2/VST3/CLAP wrappers are listed from the filesystem without starting Wine. Individual VST3 and CLAP bundles use isolated temp-dir symlink scans at load time.
 
 ### Editors
 
-`OpenEditor` with no parent window ID: worker creates a floating X11 shell and embeds via `kPlatformTypeX11EmbedWindowID`. `cott-daw` forces `WINIT_UNIX_BACKEND=x11` for this reason. Generic sliders remain available in the Plugins tab.
+`OpenEditor` with no parent window ID creates a floating X11 shell. The backend receives the appropriate X11 handle for VST2, VST3, CLAP, or LV2 UI embedding. `cott-daw` forces `WINIT_UNIX_BACKEND=x11` for this reason. Generic sliders remain available in the Plugins tab.
 
 ### Failure policy
 

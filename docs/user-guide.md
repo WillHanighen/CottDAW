@@ -5,7 +5,7 @@
 | Region | What it does |
 |--------|----------------|
 | **Top bar** | Transport, tempo, loop, undo/redo, save/open, import, export, add tracks |
-| **Left** | VST3 plugin browser (filter + rescan) |
+| **Left** | VST2/VST3/CLAP/LV2 plugin browser (filter + rescan) |
 | **Center** | Arrangement timeline — tracks, clips, playhead |
 | **Bottom tabs** | Piano Roll · Routing · Automation · Plugins |
 | **Status bar** | Status text, bar:beat position, sample rate |
@@ -30,7 +30,7 @@ Use **+ MIDI Track** or **+ Audio Track** in the top bar.
 
 Default signal paths:
 
-- **MIDI:** clip source → (optional VST instrument) → gain/pan → master
+- **MIDI:** clip source → (optional plugin instrument) → gain/pan → master
 - **Audio:** clip source → gain/pan → master
 
 ### Arrangement
@@ -57,11 +57,18 @@ Pitch range shown is roughly C2–C6. Editing notes can grow or shrink the clip 
 1. Open the left browser (**B** or the ☰ button).
 2. Click a catalog entry to load onto the selected MIDI track (instruments), or use the **Routing** canvas right-click menu.
 
-Scan locations: `~/.vst3`, `/usr/lib/vst3`, `/usr/local/lib/vst3`.
+Scan locations:
+
+- VST2: `~/.vst`, `/usr/lib/vst`, `/usr/local/lib/vst`, and `VST_PATH`
+- VST3: `~/.vst3`, `/usr/lib/vst3`, `/usr/local/lib/vst3`, and `VST3_PATH`
+- CLAP: `~/.clap`, `/usr/lib/clap`, `/usr/local/lib/clap`, and `CLAP_PATH`
+- LV2: standard Lilv locations and `LV2_PATH`
+
+For yabridge, install Windows plugins through Wine, add their directories with `yabridgectl add`, and run `yabridgectl sync`. Rescan in CottDAW afterward. VST2, VST3, and CLAP wrappers are supported.
 
 ### Plugins tab
 
-With a VST node selected:
+With a plugin node selected:
 
 - **Open editor** — floating native UI (X11 / XWayland)
 - Generic parameter sliders — always available

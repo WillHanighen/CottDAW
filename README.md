@@ -2,7 +2,7 @@
 
 Linux-first Ableton-style DAW written in Rust.
 
-Arrangement timeline, piano-roll MIDI editing, an authoritative acyclic audio/MIDI routing graph, and sandboxed VST3 hosting (one worker process per plugin). Built for PipeWire on Arch Linux.
+Arrangement timeline, piano-roll MIDI editing, an authoritative acyclic audio/MIDI routing graph, and sandboxed VST2/VST3/CLAP/LV2 hosting (one worker process per plugin). Built for PipeWire on Arch Linux.
 
 ## Features
 
@@ -10,7 +10,8 @@ Arrangement timeline, piano-roll MIDI editing, an authoritative acyclic audio/MI
 - Piano-roll MIDI editing with note audition
 - Authoritative acyclic audio/MIDI routing graph (cycles rejected)
 - Built-in gain/pan/mute, summing, and master bus
-- Sandboxed VST3 hosting (one worker process per plugin)
+- Sandboxed VST2, VST3, CLAP, and LV2 hosting (one worker process per plugin)
+- yabridge support for Windows VST2, VST3, and CLAP plugins
 - Parameter automation lanes
 - Undo / redo
 - Project save/load with periodic autosave
@@ -28,12 +29,19 @@ Arrangement timeline, piano-roll MIDI editing, an authoritative acyclic audio/MI
 
 ```bash
 sudo pacman -S --needed rust pipewire pipewire-alsa pipewire-pulse \
-  libpipewire alsa-lib cmake pkgconf ffmpeg
+  libpipewire alsa-lib cmake pkgconf ffmpeg lilv
 ```
 
-Optional: install VST3 instruments under `~/.vst3`, `/usr/lib/vst3`, or `/usr/local/lib/vst3`. yabridge Windows plugins are supported for load/process; catalog scan lists them without spawning Wine.
+Plugin search paths:
 
-**Display:** run under **X11 / XWayland** so native VST3 editors can embed. CottDAW sets `WINIT_UNIX_BACKEND=x11` at startup.
+- VST2: `~/.vst`, `/usr/lib/vst`, `/usr/local/lib/vst`, plus `VST_PATH`
+- VST3: `~/.vst3`, `/usr/lib/vst3`, `/usr/local/lib/vst3`, plus `VST3_PATH`
+- CLAP: `~/.clap`, `/usr/lib/clap`, `/usr/local/lib/clap`, plus `CLAP_PATH`
+- LV2: Lilv's standard paths plus `LV2_PATH`
+
+For Windows plugins, install Wine Staging and yabridge, register the Windows plugin directories with `yabridgectl add`, then run `yabridgectl sync`. CottDAW discovers the resulting wrappers under `~/.vst/yabridge`, `~/.vst3/yabridge`, and `~/.clap/yabridge`. Yabridge wrappers are catalogued without starting Wine; Wine starts when a plugin is loaded.
+
+**Display:** run under **X11 / XWayland** so native plugin editors can embed. CottDAW sets `WINIT_UNIX_BACKEND=x11` at startup.
 
 ## Build
 
@@ -56,7 +64,7 @@ Logging uses the `RUST_LOG` env filter (defaults include `cott_daw=info` and `co
 ## Quick workflow
 
 1. Select a MIDI track in the arrangement.
-2. Load a VST3 from the left browser (click an entry), or right-click the routing canvas.
+2. Load a plugin from the left browser (click an entry), or right-click the routing canvas.
 3. Click **+ Clip**, select the clip, draw notes in the Piano Roll (left-click add, right-click remove).
 4. Press Play (Space). Adjust gain on the track header.
 5. Open **Routing** to reconnect nodes; invalid cycles are rejected.

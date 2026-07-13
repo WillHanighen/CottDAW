@@ -4,6 +4,7 @@ mod arrangement;
 mod export_dialog;
 mod graph_editor;
 mod piano_roll;
+pub mod scale;
 mod shortcuts;
 mod transport;
 
@@ -74,7 +75,14 @@ pub struct UiState {
     pub selected_node: Option<NodeId>,
     pub beats_per_pixel: f32,
     pub scroll_x: f32,
-    pub piano_scroll: f32,
+    /// Piano-roll zoom factor (1.0 = default key/beat size).
+    pub piano_zoom: f32,
+    /// Last known piano-roll scroll offset (used to anchor zoom under cursor).
+    pub piano_scroll_offset: egui::Vec2,
+    /// Last known piano-roll viewport rect (screen space).
+    pub piano_viewport: egui::Rect,
+    /// One-shot scroll offset to apply after a zoom (keeps content anchored).
+    pub piano_pending_offset: Option<egui::Vec2>,
     pub show_browser: bool,
     pub plugin_filter: String,
     /// User-chosen height for the lower editor panel. Content must not change this.
@@ -93,7 +101,11 @@ pub struct UiState {
     pub piano_drag: Option<PianoNoteDrag>,
     /// Last pitch auditioned from the piano roll (avoid retrigger spam).
     pub piano_preview_pitch: Option<u8>,
+    /// Scale/key highlighting shown in the piano roll.
+    pub scale: scale::ScaleSettings,
     pub clip_drag: Option<ArrangementClipDrag>,
+    /// Track being renamed inline, plus the in-progress edit buffer.
+    pub renaming_track: Option<(TrackId, String)>,
     /// Export settings window (path chosen after confirm).
     pub show_export_dialog: bool,
     pub export_dialog: ExportDialogState,
@@ -108,7 +120,10 @@ impl Default for UiState {
             selected_node: None,
             beats_per_pixel: 0.02,
             scroll_x: 0.0,
-            piano_scroll: 48.0,
+            piano_zoom: 1.0,
+            piano_scroll_offset: egui::Vec2::ZERO,
+            piano_viewport: egui::Rect::ZERO,
+            piano_pending_offset: None,
             show_browser: true,
             plugin_filter: String::new(),
             lower_panel_height: 280.0,
@@ -120,7 +135,9 @@ impl Default for UiState {
             graph_panning: false,
             piano_drag: None,
             piano_preview_pitch: None,
+            scale: scale::ScaleSettings::default(),
             clip_drag: None,
+            renaming_track: None,
             show_export_dialog: false,
             export_dialog: ExportDialogState::default(),
         }
@@ -143,10 +160,7 @@ pub fn draw(app: &mut CottApp, ctx: &egui::Context) {
                     let (bar, beat) = app.project.tempo.bar_beat_from_beats(pos);
                     ui.label(format!(
                         "{}:{:.2}  ({}/{})",
-                        bar,
-                        beat,
-                        app.project.tempo.beats_per_bar,
-                        app.project.tempo.beat_unit
+                        bar, beat, app.project.tempo.beats_per_bar, app.project.tempo.beat_unit
                     ));
                     if let Some(audio) = &app.audio {
                         ui.label(format!("{} Hz", audio.sample_rate));
@@ -235,11 +249,14 @@ fn draw_browser(app: &mut CottApp, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
         let scanning = app.is_scanning_plugins();
         if ui
-            .add_enabled(!scanning, egui::Button::new(if scanning {
-                "Scanning…"
-            } else {
-                "Rescan VSTs"
-            }))
+            .add_enabled(
+                !scanning,
+                egui::Button::new(if scanning {
+                    "Scanning…"
+                } else {
+                    "Rescan VSTs"
+                }),
+            )
             .clicked()
         {
             app.start_plugin_scan();
@@ -277,15 +294,14 @@ fn draw_browser(app: &mut CottApp, ui: &mut egui::Ui) {
             ui.weak("Building plugin list…");
         }
         for plugin in catalog {
+            let category = match (plugin.is_instrument, plugin.is_effect) {
+                (true, true) => "Instrument / Effect",
+                (true, false) => "Instrument",
+                _ => "Effect",
+            };
             let label = format!(
-                "{} [{}] — {}",
-                plugin.name,
-                if plugin.is_instrument {
-                    "Instrument"
-                } else {
-                    "Effect"
-                },
-                plugin.vendor,
+                "{} [{} · {}] — {}",
+                plugin.name, plugin.format, category, plugin.vendor,
             );
             if ui
                 .button(label)
@@ -297,18 +313,25 @@ fn draw_browser(app: &mut CottApp, ui: &mut egui::Ui) {
             {
                 if plugin.is_instrument {
                     app.load_instrument_on_selected_track(
+                        plugin.format,
                         plugin.uid,
                         plugin.path,
                         plugin.name,
                         [200.0, 120.0],
                     );
                 } else {
-                    app.load_effect(plugin.uid, plugin.path, plugin.name, [280.0, 120.0]);
+                    app.load_effect(
+                        plugin.format,
+                        plugin.uid,
+                        plugin.path,
+                        plugin.name,
+                        [280.0, 120.0],
+                    );
                 }
             }
         }
         if catalog_is_empty && !app.is_scanning_plugins() {
-            ui.weak("No plugins found. Install VST3s in ~/.vst3");
+            ui.weak("No plugins found in VST2/VST3/CLAP/LV2 search paths");
         }
     });
 }
@@ -358,12 +381,12 @@ fn draw_plugin_inspector(app: &mut CottApp, ui: &mut egui::Ui) {
     };
     ui.heading(&node.name);
     let instance = match &node.kind {
-        cott_core::graph::NodeKind::Vst3Instrument {
+        cott_core::graph::NodeKind::PluginInstrument {
             instance_id,
             failed,
             ..
         }
-        | cott_core::graph::NodeKind::Vst3Effect {
+        | cott_core::graph::NodeKind::PluginEffect {
             instance_id,
             failed,
             ..

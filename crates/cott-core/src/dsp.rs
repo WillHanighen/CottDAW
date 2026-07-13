@@ -166,6 +166,8 @@ pub struct TransportBlockInfo {
     pub block_start: SamplePos,
     pub block_len: u32,
     pub bpm: f64,
+    pub time_sig_numerator: u32,
+    pub time_sig_denominator: u32,
     pub playing: bool,
 }
 
@@ -240,15 +242,15 @@ pub fn process_block(
         block_start: ctx.block_start,
         block_len: ctx.block_len,
         bpm: ctx.tempo.bpm,
+        time_sig_numerator: ctx.tempo.beats_per_bar,
+        time_sig_denominator: ctx.tempo.beat_unit,
         playing: matches!(ctx.transport, TransportState::Playing),
     };
 
-    let any_solo = plan.nodes.values().any(|n| {
-        matches!(
-            &n.kind,
-            NodeKind::GainPan { solo: true, .. }
-        )
-    });
+    let any_solo = plan
+        .nodes
+        .values()
+        .any(|n| matches!(&n.kind, NodeKind::GainPan { solo: true, .. }));
 
     let beat = ctx.tempo.sample_to_beat(ctx.block_start).0;
     for lane in ctx.automation.iter().filter(|l| l.enabled) {
@@ -353,7 +355,7 @@ pub fn process_block(
                 master.add_from(&input);
                 output = input;
             }
-            NodeKind::Vst3Instrument {
+            NodeKind::PluginInstrument {
                 instance_id,
                 failed,
                 ..
@@ -373,7 +375,7 @@ pub fn process_block(
                     }
                 }
             }
-            NodeKind::Vst3Effect {
+            NodeKind::PluginEffect {
                 instance_id,
                 bypass,
                 failed,
@@ -396,11 +398,7 @@ pub fn process_block(
         }
 
         // Apply plugin delay compensation before exposing audio to downstream ports.
-        let delay = plan
-            .delay_compensation
-            .get(node_id)
-            .copied()
-            .unwrap_or(0) as usize;
+        let delay = plan.delay_compensation.get(node_id).copied().unwrap_or(0) as usize;
         if delay > 0 {
             let state = ctx.pdc_state.entry(*node_id).or_default();
             output.delay_with_state(delay, state);
@@ -597,9 +595,10 @@ mod tests {
             }
         }
         let plan = project.compiled_plan();
-        let any_solo = plan.nodes.values().any(|n| {
-            matches!(&n.kind, NodeKind::GainPan { solo: true, .. })
-        });
+        let any_solo = plan
+            .nodes
+            .values()
+            .any(|n| matches!(&n.kind, NodeKind::GainPan { solo: true, .. }));
         assert!(any_solo);
         let b_soloed = matches!(
             &plan.nodes[&gain_b].kind,
@@ -624,6 +623,8 @@ mod tests {
             block_start: SamplePos(0),
             block_len: 48,
             bpm: 120.0,
+            time_sig_numerator: 4,
+            time_sig_denominator: 4,
             playing: true,
         };
         let ctx24 = TransportBlockInfo {
@@ -631,10 +632,22 @@ mod tests {
             block_start: SamplePos(0),
             block_len: 48,
             bpm: 120.0,
+            time_sig_numerator: 4,
+            time_sig_denominator: 4,
             playing: true,
         };
-        host.process_instrument(crate::ids::PluginInstanceId::new(), &midi, &mut out_48, &ctx48);
-        host.process_instrument(crate::ids::PluginInstanceId::new(), &midi, &mut out_24, &ctx24);
+        host.process_instrument(
+            crate::ids::PluginInstanceId::new(),
+            &midi,
+            &mut out_48,
+            &ctx48,
+        );
+        host.process_instrument(
+            crate::ids::PluginInstanceId::new(),
+            &midi,
+            &mut out_24,
+            &ctx24,
+        );
         // At A440, one period is 48 samples @ 48k and 24 samples @ 24k — peaks should differ.
         assert!(out_48.peak() > 0.0);
         assert!(out_24.peak() > 0.0);
@@ -687,7 +700,9 @@ mod tests {
                 "Instrument".into(),
             )
             .unwrap();
-        let gain = project.tracks.iter()
+        let gain = project
+            .tracks
+            .iter()
             .find(|candidate| candidate.id == track)
             .and_then(|track| track.gain_node)
             .unwrap();
@@ -697,15 +712,19 @@ mod tests {
             "Effect".into(),
             [0.0, 0.0],
         );
-        project.graph.edges.retain(
-            |_, edge| !(edge.from_node == instrument && edge.to_node == gain)
-        );
+        project
+            .graph
+            .edges
+            .retain(|_, edge| !(edge.from_node == instrument && edge.to_node == gain));
         project.graph.connect_stereo(instrument, effect).unwrap();
         project.graph.connect_stereo(effect, gain).unwrap();
 
         let plan = project.compiled_plan();
         let cache = SampleCache::default();
-        let mut host = ChainHost { instrument_calls: 0, effect_calls: 0 };
+        let mut host = ChainHost {
+            instrument_calls: 0,
+            effect_calls: 0,
+        };
         let mut meters = IndexMap::new();
         let mut pdc_state = IndexMap::new();
         let mut ctx = ProcessContext {

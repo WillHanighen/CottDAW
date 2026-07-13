@@ -49,6 +49,7 @@ x11-dl = "2.21"
 bitflags = { version = "2", features = ["serde"] }
 smallvec = { version = "1", features = ["serde"] }
 indexmap = { version = "2", features = ["serde"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 # Call Linux VST3 ModuleEntry before GetPluginFactory (needed for yabridge).
 [patch.crates-io]

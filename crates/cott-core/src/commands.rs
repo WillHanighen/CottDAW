@@ -33,6 +33,12 @@ pub enum Command {
         old_length: f64,
         new_length: f64,
     },
+    /// Move a clip onto a different track.
+    SetClipTrack {
+        clip_id: ClipId,
+        old_track: TrackId,
+        new_track: TrackId,
+    },
     AddNote {
         clip_id: ClipId,
         note: MidiNote,
@@ -174,12 +180,11 @@ fn apply(project: &mut Project, cmd: &Command, reverse: bool) {
                     project.graph.add_node(n.clone());
                 }
                 for e in edges {
-                    if let Err(err) = project.graph.connect(
-                        e.from_node,
-                        e.from_port,
-                        e.to_node,
-                        e.to_port,
-                    ) {
+                    if let Err(err) =
+                        project
+                            .graph
+                            .connect(e.from_node, e.from_port, e.to_node, e.to_port)
+                    {
                         tracing::warn!("undo/redo reconnect failed: {err}");
                     }
                 }
@@ -199,12 +204,11 @@ fn apply(project: &mut Project, cmd: &Command, reverse: bool) {
                     project.graph.add_node(n.clone());
                 }
                 for e in edges {
-                    if let Err(err) = project.graph.connect(
-                        e.from_node,
-                        e.from_port,
-                        e.to_node,
-                        e.to_port,
-                    ) {
+                    if let Err(err) =
+                        project
+                            .graph
+                            .connect(e.from_node, e.from_port, e.to_node, e.to_port)
+                    {
                         tracing::warn!("undo/redo reconnect failed: {err}");
                     }
                 }
@@ -247,6 +251,15 @@ fn apply(project: &mut Project, cmd: &Command, reverse: bool) {
                     clip.start_beats = *new_start;
                     clip.length_beats = *new_length;
                 }
+            }
+        }
+        Command::SetClipTrack {
+            clip_id,
+            old_track,
+            new_track,
+        } => {
+            if let Some(clip) = project.clips.iter_mut().find(|c| c.id == *clip_id) {
+                clip.track_id = if reverse { *old_track } else { *new_track };
             }
         }
         Command::AddNote { clip_id, note } => {
@@ -318,12 +331,11 @@ fn apply(project: &mut Project, cmd: &Command, reverse: bool) {
         Command::Connect { edge } => {
             if reverse {
                 project.graph.disconnect(edge.id);
-            } else if let Err(err) = project.graph.connect(
-                edge.from_node,
-                edge.from_port,
-                edge.to_node,
-                edge.to_port,
-            ) {
+            } else if let Err(err) =
+                project
+                    .graph
+                    .connect(edge.from_node, edge.from_port, edge.to_node, edge.to_port)
+            {
                 tracing::warn!("undo/redo connect failed: {err}");
             }
         }
@@ -345,12 +357,11 @@ fn apply(project: &mut Project, cmd: &Command, reverse: bool) {
             if reverse {
                 project.graph.disconnect(edge.id);
                 for e in replaced {
-                    if let Err(err) = project.graph.connect(
-                        e.from_node,
-                        e.from_port,
-                        e.to_node,
-                        e.to_port,
-                    ) {
+                    if let Err(err) =
+                        project
+                            .graph
+                            .connect(e.from_node, e.from_port, e.to_node, e.to_port)
+                    {
                         tracing::warn!("undo/redo reconnect failed: {err}");
                     }
                 }
@@ -384,12 +395,11 @@ fn apply(project: &mut Project, cmd: &Command, reverse: bool) {
             if reverse {
                 project.graph.add_node(node.clone());
                 for e in edges {
-                    if let Err(err) = project.graph.connect(
-                        e.from_node,
-                        e.from_port,
-                        e.to_node,
-                        e.to_port,
-                    ) {
+                    if let Err(err) =
+                        project
+                            .graph
+                            .connect(e.from_node, e.from_port, e.to_node, e.to_port)
+                    {
                         tracing::warn!("undo/redo reconnect failed: {err}");
                     }
                 }
@@ -491,6 +501,126 @@ mod tests {
     }
 
     #[test]
+    fn set_clip_track_moves_and_undoes() {
+        let mut project = Project::new("t");
+        let a = project.add_midi_track("A");
+        let b = project.add_midi_track("B");
+        let clip = Clip::new_midi(a, "C", 0.0, 4.0);
+        let clip_id = clip.id;
+        let mut stack = CommandStack::default();
+        stack.push(&mut project, Command::AddClip { clip });
+
+        stack.push(
+            &mut project,
+            Command::SetClipTrack {
+                clip_id,
+                old_track: a,
+                new_track: b,
+            },
+        );
+        assert_eq!(
+            project
+                .clips
+                .iter()
+                .find(|c| c.id == clip_id)
+                .unwrap()
+                .track_id,
+            b
+        );
+        assert!(stack.undo(&mut project));
+        assert_eq!(
+            project
+                .clips
+                .iter()
+                .find(|c| c.id == clip_id)
+                .unwrap()
+                .track_id,
+            a
+        );
+        assert!(stack.redo(&mut project));
+        assert_eq!(
+            project
+                .clips
+                .iter()
+                .find(|c| c.id == clip_id)
+                .unwrap()
+                .track_id,
+            b
+        );
+    }
+
+    #[test]
+    fn remove_track_takes_clips_and_nodes_and_undoes() {
+        let mut project = Project::new("t");
+        let track_id = project.add_midi_track("Synth");
+        let track = project
+            .tracks
+            .iter()
+            .find(|t| t.id == track_id)
+            .unwrap()
+            .clone();
+        let clip = Clip::new_midi(track_id, "C", 0.0, 4.0);
+        project.clips.push(clip);
+
+        let node_ids: Vec<_> = [
+            track.midi_source_node,
+            track.gain_node,
+            track.instrument_node,
+            track.audio_source_node,
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        let nodes: Vec<_> = node_ids
+            .iter()
+            .filter_map(|nid| project.graph.nodes.get(nid).cloned())
+            .collect();
+        let edges: Vec<_> = project
+            .graph
+            .edges
+            .values()
+            .filter(|e| node_ids.contains(&e.from_node) || node_ids.contains(&e.to_node))
+            .cloned()
+            .collect();
+        let clips: Vec<_> = project
+            .clips
+            .iter()
+            .filter(|c| c.track_id == track_id)
+            .cloned()
+            .collect();
+
+        let mut stack = CommandStack::default();
+        stack.push(
+            &mut project,
+            Command::RemoveTrack {
+                track,
+                clips,
+                nodes,
+                edges,
+            },
+        );
+        assert!(!project.tracks.iter().any(|t| t.id == track_id));
+        assert!(!project.clips.iter().any(|c| c.track_id == track_id));
+        for nid in &node_ids {
+            assert!(!project.graph.nodes.contains_key(nid));
+        }
+
+        assert!(stack.undo(&mut project));
+        assert!(project.tracks.iter().any(|t| t.id == track_id));
+        assert_eq!(
+            project
+                .clips
+                .iter()
+                .filter(|c| c.track_id == track_id)
+                .count(),
+            1
+        );
+        for nid in &node_ids {
+            assert!(project.graph.nodes.contains_key(nid));
+        }
+    }
+
+    #[test]
     fn undo_redo_add_node() {
         let mut project = Project::new("t");
         let mut stack = CommandStack::default();
@@ -549,16 +679,11 @@ mod tests {
         let mut project = Project::new("t");
         let track = project.add_midi_track("Synth");
         let (node_id, _) = project
-            .attach_instrument(
-                track,
-                "uid".into(),
-                "/tmp/x.vst3".into(),
-                "X".into(),
-            )
+            .attach_instrument(track, "uid".into(), "/tmp/x.vst3".into(), "X".into())
             .unwrap();
         let node = project.graph.nodes[&node_id].clone();
         let plugin_state = match &node.kind {
-            crate::graph::NodeKind::Vst3Instrument { instance_id, .. } => {
+            crate::graph::NodeKind::PluginInstrument { instance_id, .. } => {
                 project.plugin_states.get(instance_id).cloned()
             }
             _ => None,

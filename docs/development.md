@@ -78,7 +78,8 @@ Useful `cott-core` areas covered by unit tests include tempo/sample conversion, 
 | Audio device | `cott-daw/src/audio.rs` |
 | Worker spawn / scan / process | `cott-daw/src/plugins.rs` |
 | UI panels | `cott-daw/src/ui/*` |
-| VST load & process | `cott-vst-worker/src/vst.rs`, `host.rs` |
+| VST3/CLAP/LV2 load & process | `cott-vst-worker/src/vst.rs` |
+| VST2/yabridge legacy host | `cott-vst-worker/src/vst2.rs` |
 | X11 editor embed | `cott-vst-worker/src/x11_editor.rs` |
 | Instrument vs effect heuristics | `cott-vst-worker/src/classify.rs` |
 
@@ -100,11 +101,11 @@ RUST_LOG=cott_daw=debug,cott_vst_worker=debug cargo run -p cott-daw
 
 Worker stderr is forwarded into host tracing. Failed instances show in the Plugins tab with **Restart**.
 
-For yabridge: catalog scan does not spawn Wine; first **Load** may be slow. The vendored `truce-rack-vst3` patch ensures `ModuleEntry` runs before factory lookup.
+For yabridge: catalog scan defers VST2/VST3/CLAP wrappers so it does not spawn Wine; first **Load** may be slow. The vendored `truce-rack-vst3` patch ensures `ModuleEntry` runs before factory lookup.
 
 ## Project file version
 
-`PROJECT_VERSION = 1` in `cott-core/src/project.rs`. Loading a newer version than the binary supports is an error. Older versions are bumped forward on load (no multi-step migrators yet).
+`PROJECT_VERSION = 2` in `cott-core/src/project.rs`. Version 1 VST3 node names deserialize through aliases and default to the VST3 format. Loading a newer version than the binary supports is an error.
 
 ## Style notes
 

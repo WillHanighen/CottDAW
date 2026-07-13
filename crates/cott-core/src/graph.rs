@@ -81,15 +81,21 @@ pub enum NodeKind {
     },
     SumMixer,
     MasterOutput,
-    Vst3Instrument {
+    #[serde(alias = "Vst3Instrument")]
+    PluginInstrument {
         instance_id: PluginInstanceId,
+        #[serde(default = "default_vst3_format")]
+        plugin_format: String,
         plugin_uid: String,
         plugin_path: String,
         plugin_name: String,
         failed: bool,
     },
-    Vst3Effect {
+    #[serde(alias = "Vst3Effect")]
+    PluginEffect {
         instance_id: PluginInstanceId,
+        #[serde(default = "default_vst3_format")]
+        plugin_format: String,
         plugin_uid: String,
         plugin_path: String,
         plugin_name: String,
@@ -177,8 +183,9 @@ impl GraphNode {
         }
     }
 
-    pub fn vst3_effect(
+    pub fn plugin_effect(
         instance_id: PluginInstanceId,
+        plugin_format: String,
         plugin_uid: String,
         plugin_path: String,
         plugin_name: String,
@@ -186,8 +193,9 @@ impl GraphNode {
         Self {
             id: NodeId::new(),
             name: plugin_name.clone(),
-            kind: NodeKind::Vst3Effect {
+            kind: NodeKind::PluginEffect {
                 instance_id,
+                plugin_format,
                 plugin_uid,
                 plugin_path,
                 plugin_name,
@@ -201,12 +209,31 @@ impl GraphNode {
         }
     }
 
+    pub fn vst3_effect(
+        instance_id: PluginInstanceId,
+        plugin_uid: String,
+        plugin_path: String,
+        plugin_name: String,
+    ) -> Self {
+        Self::plugin_effect(
+            instance_id,
+            default_vst3_format(),
+            plugin_uid,
+            plugin_path,
+            plugin_name,
+        )
+    }
+
     pub fn find_port(&self, id: PortId) -> Option<&Port> {
         self.inputs
             .iter()
             .chain(self.outputs.iter())
             .find(|p| p.id == id)
     }
+}
+
+fn default_vst3_format() -> String {
+    "vst3".to_owned()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

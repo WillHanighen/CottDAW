@@ -3,7 +3,7 @@
 use crate::audio::AudioEngine;
 use crate::plugins::PluginHost;
 use crate::ui::{self, UiState};
-use cott_core::clips::{MidiNote, TrackKind};
+use cott_core::clips::{ClipContent, MidiNote, TrackKind};
 use cott_core::commands::{Command, CommandStack};
 use cott_core::dsp::SampleCache;
 use cott_core::engine::{EngineCommand, push_project_snapshot};
@@ -18,7 +18,7 @@ use cott_core::import::{
 };
 use cott_core::project::Project;
 use cott_core::time::TransportState;
-use cott_ipc::PluginDescriptor;
+use cott_ipc::{PluginDescriptor, PluginFormat};
 use eframe::egui;
 use indexmap::IndexMap;
 use parking_lot::Mutex;
@@ -118,8 +118,8 @@ impl CottApp {
         std::thread::Builder::new()
             .name("cott-plugin-scan".into())
             .spawn(move || {
-                let result = PluginHost::scan_catalog(&worker_bin, &blacklist)
-                    .map_err(|e| format!("{e:#}"));
+                let result =
+                    PluginHost::scan_catalog(&worker_bin, &blacklist).map_err(|e| format!("{e:#}"));
                 let _ = tx.send(result);
             })
             .expect("spawn plugin scan thread");
@@ -180,12 +180,12 @@ impl CottApp {
         let mut dirty = false;
         for node in self.project.graph.nodes.values_mut() {
             let (instance_id, failed_flag) = match &mut node.kind {
-                NodeKind::Vst3Instrument {
+                NodeKind::PluginInstrument {
                     instance_id,
                     failed,
                     ..
                 }
-                | NodeKind::Vst3Effect {
+                | NodeKind::PluginEffect {
                     instance_id,
                     failed,
                     ..
@@ -369,20 +369,23 @@ impl CottApp {
             .nodes
             .iter()
             .filter_map(|(node_id, node)| match &node.kind {
-                NodeKind::Vst3Instrument {
+                NodeKind::PluginInstrument {
                     instance_id,
+                    plugin_format,
                     plugin_uid,
                     plugin_path,
                     ..
                 }
-                | NodeKind::Vst3Effect {
+                | NodeKind::PluginEffect {
                     instance_id,
+                    plugin_format,
                     plugin_uid,
                     plugin_path,
                     ..
                 } => Some((
                     *node_id,
                     *instance_id,
+                    plugin_format.clone(),
                     plugin_uid.clone(),
                     plugin_path.clone(),
                 )),
@@ -391,7 +394,7 @@ impl CottApp {
             .collect();
         let mut host = self.plugin_host.lock();
         let mut any_failed = false;
-        for (node_id, instance_id, plugin_uid, plugin_path) in targets {
+        for (node_id, instance_id, plugin_format, plugin_uid, plugin_path) in targets {
             let state = self
                 .project
                 .plugin_states
@@ -399,6 +402,7 @@ impl CottApp {
                 .map(|b| b.data.clone());
             if let Err(e) = host.load(
                 instance_id,
+                parse_plugin_format(&plugin_format).unwrap_or(PluginFormat::Vst3),
                 &plugin_uid,
                 PathBuf::from(&plugin_path).as_path(),
                 sr,
@@ -409,8 +413,8 @@ impl CottApp {
                 any_failed = true;
                 if let Some(node) = self.project.graph.nodes.get_mut(&node_id) {
                     match &mut node.kind {
-                        NodeKind::Vst3Instrument { failed, .. }
-                        | NodeKind::Vst3Effect { failed, .. } => {
+                        NodeKind::PluginInstrument { failed, .. }
+                        | NodeKind::PluginEffect { failed, .. } => {
                             *failed = true;
                         }
                         _ => {}
@@ -538,8 +542,138 @@ impl CottApp {
         self.sync_engine();
     }
 
+    /// Delete a track along with its clips and default chain nodes (undoable).
+    pub fn remove_track(&mut self, track_id: TrackId) {
+        let Some(cmd) = track_remove_command(&self.project, track_id) else {
+            return;
+        };
+        let Some(track) = self
+            .project
+            .tracks
+            .iter()
+            .find(|t| t.id == track_id)
+            .cloned()
+        else {
+            return;
+        };
+        let name = track.name.clone();
+
+        // Node IDs that belong to this track's chain (used to clear selection).
+        let node_ids: Vec<NodeId> = [
+            track.midi_source_node,
+            track.audio_source_node,
+            track.instrument_node,
+            track.gain_node,
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+
+        // Tear down the instrument's worker so we don't orphan a Wine process.
+        if let Some(inst) = track.instrument_node {
+            if let Some(node) = self.project.graph.nodes.get(&inst) {
+                if let NodeKind::PluginInstrument { instance_id, .. } = &node.kind {
+                    self.plugin_host.lock().unload(*instance_id);
+                }
+            }
+        }
+
+        // Clips that will be removed with the track (to clear selection).
+        let removed_clips: Vec<ClipId> = self
+            .project
+            .clips
+            .iter()
+            .filter(|c| c.track_id == track_id)
+            .map(|c| c.id)
+            .collect();
+
+        self.commands.push(&mut self.project, cmd);
+
+        if self.ui.selected_track == Some(track_id) {
+            self.ui.selected_track = None;
+        }
+        if self.ui.selected_node.is_some_and(|n| node_ids.contains(&n)) {
+            self.ui.selected_node = None;
+        }
+        if self
+            .ui
+            .selected_clip
+            .is_some_and(|c| removed_clips.contains(&c))
+        {
+            self.ui.selected_clip = None;
+            self.ui.piano_drag = None;
+        }
+        if self
+            .ui
+            .clip_drag
+            .as_ref()
+            .is_some_and(|d| d.track_id == track_id)
+        {
+            self.ui.clip_drag = None;
+        }
+
+        self.sync_engine();
+        self.status = format!("Deleted track {name}");
+    }
+
+    pub fn remove_selected_track(&mut self) {
+        let Some(track_id) = self.ui.selected_track else {
+            return;
+        };
+        self.remove_track(track_id);
+    }
+
+    /// Move a clip onto a different track (must match the track's kind).
+    pub fn move_clip_to_track(&mut self, clip_id: ClipId, new_track: TrackId) {
+        let Some(clip) = self.project.clips.iter().find(|c| c.id == clip_id) else {
+            return;
+        };
+        let old_track = clip.track_id;
+        if old_track == new_track {
+            return;
+        }
+        let clip_is_midi = matches!(clip.content, ClipContent::Midi { .. });
+        let Some(target) = self.project.tracks.iter().find(|t| t.id == new_track) else {
+            return;
+        };
+        let compatible = match target.kind {
+            TrackKind::Midi => clip_is_midi,
+            TrackKind::Audio => !clip_is_midi,
+        };
+        if !compatible {
+            self.status = "Clip type does not match the target track".into();
+            return;
+        }
+        let target_name = target.name.clone();
+        self.commands.push(
+            &mut self.project,
+            Command::SetClipTrack {
+                clip_id,
+                old_track,
+                new_track,
+            },
+        );
+        self.sync_engine();
+        self.status = format!("Moved clip to {target_name}");
+    }
+
+    /// Rename a track. Not tracked on the undo stack (low-stakes metadata edit).
+    pub fn rename_track(&mut self, track_id: TrackId, name: String) {
+        let name = name.trim();
+        if name.is_empty() {
+            return;
+        }
+        if let Some(track) = self.project.tracks.iter_mut().find(|t| t.id == track_id) {
+            if track.name != name {
+                track.name = name.to_string();
+                self.project.touch();
+            }
+        }
+    }
+
     pub fn load_instrument_on_selected_track(
         &mut self,
+        format: PluginFormat,
         uid: String,
         path: PathBuf,
         name: String,
@@ -567,8 +701,9 @@ impl CottApp {
             return;
         };
         self.ui.selected_track = Some(track_id);
-        let Some((node_id, unloaded)) = self.project.attach_instrument(
+        let Some((node_id, unloaded)) = self.project.attach_plugin_instrument(
             track_id,
+            format.as_str().into(),
             uid.clone(),
             path.display().to_string(),
             name.clone(),
@@ -583,14 +718,14 @@ impl CottApp {
             node.position = position;
         }
         let instance_id = match &self.project.graph.nodes[&node_id].kind {
-            NodeKind::Vst3Instrument { instance_id, .. } => *instance_id,
+            NodeKind::PluginInstrument { instance_id, .. } => *instance_id,
             _ => PluginInstanceId::new(),
         };
         let sr = self.audio.as_ref().map(|a| a.sample_rate).unwrap_or(48_000) as f64;
         let bs = self.audio.as_ref().map(|a| a.buffer_size).unwrap_or(256);
         let load_result = {
             let mut host = self.plugin_host.lock();
-            host.load(instance_id, &uid, &path, sr, bs, None)
+            host.load(instance_id, format, &uid, &path, sr, bs, None)
         };
         match load_result {
             Ok(()) => {
@@ -616,15 +751,23 @@ impl CottApp {
         }
     }
 
-    pub fn load_effect(&mut self, uid: String, path: PathBuf, name: String, position: [f32; 2]) {
-        let node_id = self.project.add_effect(
+    pub fn load_effect(
+        &mut self,
+        format: PluginFormat,
+        uid: String,
+        path: PathBuf,
+        name: String,
+        position: [f32; 2],
+    ) {
+        let node_id = self.project.add_plugin_effect(
+            format.as_str().into(),
             uid.clone(),
             path.display().to_string(),
             name.clone(),
             position,
         );
         let instance_id = match &self.project.graph.nodes[&node_id].kind {
-            NodeKind::Vst3Effect { instance_id, .. } => *instance_id,
+            NodeKind::PluginEffect { instance_id, .. } => *instance_id,
             _ => {
                 self.status = "Could not create effect node".into();
                 return;
@@ -634,7 +777,7 @@ impl CottApp {
         let bs = self.audio.as_ref().map(|a| a.buffer_size).unwrap_or(256);
         let load_result = {
             let mut host = self.plugin_host.lock();
-            host.load(instance_id, &uid, &path, sr, bs, None)
+            host.load(instance_id, format, &uid, &path, sr, bs, None)
         };
         match load_result {
             Ok(()) => {
@@ -664,9 +807,9 @@ impl CottApp {
                 .tracks
                 .iter()
                 .any(|track| track.gain_node == Some(node_id)),
-            NodeKind::SumMixer | NodeKind::Vst3Instrument { .. } | NodeKind::Vst3Effect { .. } => {
-                true
-            }
+            NodeKind::SumMixer
+            | NodeKind::PluginInstrument { .. }
+            | NodeKind::PluginEffect { .. } => true,
         }
     }
 
@@ -690,8 +833,8 @@ impl CottApp {
         let mut instrument_track = None;
         let mut plugin_state = None;
         match &node.kind {
-            NodeKind::Vst3Instrument { instance_id, .. }
-            | NodeKind::Vst3Effect { instance_id, .. } => {
+            NodeKind::PluginInstrument { instance_id, .. }
+            | NodeKind::PluginEffect { instance_id, .. } => {
                 let instance_id = *instance_id;
                 self.plugin_host.lock().unload(instance_id);
                 plugin_state = self.project.plugin_states.shift_remove(&instance_id);
@@ -906,13 +1049,7 @@ impl CottApp {
     }
 
     pub fn remove_clip(&mut self, clip_id: ClipId) {
-        let Some(clip) = self
-            .project
-            .clips
-            .iter()
-            .find(|c| c.id == clip_id)
-            .cloned()
-        else {
+        let Some(clip) = self.project.clips.iter().find(|c| c.id == clip_id).cloned() else {
             return;
         };
         let name = clip.name.clone();
@@ -936,12 +1073,7 @@ impl CottApp {
         self.remove_clip(clip_id);
     }
 
-    pub fn move_clip(
-        &mut self,
-        clip_id: ClipId,
-        new_start: f64,
-        new_length: f64,
-    ) {
+    pub fn move_clip(&mut self, clip_id: ClipId, new_start: f64, new_length: f64) {
         let Some(clip) = self.project.clips.iter().find(|c| c.id == clip_id) else {
             return;
         };
@@ -1000,11 +1132,7 @@ impl CottApp {
 
     /// Audition a MIDI pitch through the track's instrument (works while stopped).
     pub fn preview_note(&mut self, track_id: TrackId, pitch: u8) {
-        let sample_rate = self
-            .audio
-            .as_ref()
-            .map(|a| a.sample_rate)
-            .unwrap_or(48_000);
+        let sample_rate = self.audio.as_ref().map(|a| a.sample_rate).unwrap_or(48_000);
         let duration_samples = ((sample_rate as f64) * 0.18).round() as u32;
         if let Some(audio) = &mut self.audio {
             let _ = audio.cmd_tx.push(EngineCommand::PreviewNote {
@@ -1023,25 +1151,25 @@ impl CottApp {
         }
     }
 
-    /// Open the native VST editor for an instrument/effect node (floating window).
+    /// Open the native plugin editor for an instrument/effect node.
     pub fn open_plugin_editor_for_node(&mut self, node_id: NodeId) {
         let Some(node) = self.project.graph.nodes.get(&node_id) else {
             self.status = "No node selected".into();
             return;
         };
         let (instance_id, failed) = match &node.kind {
-            NodeKind::Vst3Instrument {
+            NodeKind::PluginInstrument {
                 instance_id,
                 failed,
                 ..
             }
-            | NodeKind::Vst3Effect {
+            | NodeKind::PluginEffect {
                 instance_id,
                 failed,
                 ..
             } => (*instance_id, *failed),
             _ => {
-                self.status = "Not a plugin node — select a VST instrument/effect".into();
+                self.status = "Not a plugin node — select an instrument/effect".into();
                 return;
             }
         };
@@ -1080,6 +1208,16 @@ impl CottApp {
             },
         );
         self.sync_engine();
+    }
+}
+
+fn parse_plugin_format(format: &str) -> Option<PluginFormat> {
+    match format {
+        "vst2" => Some(PluginFormat::Vst2),
+        "vst3" => Some(PluginFormat::Vst3),
+        "clap" => Some(PluginFormat::Clap),
+        "lv2" => Some(PluginFormat::Lv2),
+        _ => None,
     }
 }
 
@@ -1128,6 +1266,42 @@ fn track_add_command(project: &Project, track_id: TrackId) -> Option<Command> {
         .collect();
     Some(Command::AddTrack {
         track,
+        nodes,
+        edges,
+    })
+}
+
+fn track_remove_command(project: &Project, track_id: TrackId) -> Option<Command> {
+    let track = project.tracks.iter().find(|t| t.id == track_id)?.clone();
+    let node_ids: Vec<NodeId> = [
+        track.midi_source_node,
+        track.audio_source_node,
+        track.gain_node,
+        track.instrument_node,
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    let nodes: Vec<_> = node_ids
+        .iter()
+        .filter_map(|id| project.graph.nodes.get(id).cloned())
+        .collect();
+    let edges: Vec<_> = project
+        .graph
+        .edges
+        .values()
+        .filter(|e| node_ids.contains(&e.from_node) || node_ids.contains(&e.to_node))
+        .cloned()
+        .collect();
+    let clips: Vec<_> = project
+        .clips
+        .iter()
+        .filter(|c| c.track_id == track_id)
+        .cloned()
+        .collect();
+    Some(Command::RemoveTrack {
+        track,
+        clips,
         nodes,
         edges,
     })

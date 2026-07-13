@@ -5,8 +5,8 @@ use cott_core::dsp::{AudioBuffer, PluginAudioHost, TransportBlockInfo};
 use cott_core::ids::PluginInstanceId;
 use cott_ipc::posix::SharedAudioRegion;
 use cott_ipc::{
-    HostToWorker, PROTOCOL_VERSION, ParamInfo, PluginDescriptor, ShmFlags, ShmMidiEvent,
-    TransportInfo, WorkerToHost, encode_message, shm_name_for, try_decode_message,
+    HostToWorker, PROTOCOL_VERSION, ParamInfo, PluginDescriptor, PluginFormat, ShmFlags,
+    ShmMidiEvent, TransportInfo, WorkerToHost, encode_message, shm_name_for, try_decode_message,
 };
 use indexmap::IndexMap;
 use parking_lot::Mutex;
@@ -21,6 +21,7 @@ use uuid::Uuid;
 
 pub struct PluginInstance {
     pub id: PluginInstanceId,
+    pub format: PluginFormat,
     pub uid: String,
     pub path: PathBuf,
     pub name: String,
@@ -109,7 +110,13 @@ impl PluginHost {
         })?;
 
         let (mut stream, _) = listener.accept()?;
-        wait_hello(&mut stream)?;
+        wait_hello(&mut stream).with_context(|| {
+            format!(
+                "plugin worker handshake failed for {}. Rebuild both binaries with \
+                 `cargo build -p cott-daw -p cott-vst-worker`",
+                worker_bin.display()
+            )
+        })?;
 
         send(
             &mut stream,
@@ -143,6 +150,7 @@ impl PluginHost {
     pub fn load(
         &mut self,
         id: PluginInstanceId,
+        format: PluginFormat,
         uid: &str,
         path: &Path,
         sample_rate: f64,
@@ -177,10 +185,17 @@ impl PluginHost {
                 .ok();
         }
         let (mut stream, _) = listener.accept()?;
-        wait_hello(&mut stream)?;
+        wait_hello(&mut stream).with_context(|| {
+            format!(
+                "plugin worker handshake failed for {}. Rebuild both binaries with \
+                 `cargo build -p cott-daw -p cott-vst-worker`",
+                self.worker_bin.display()
+            )
+        })?;
         send(
             &mut stream,
             &HostToWorker::Load {
+                format,
                 path: path.to_path_buf(),
                 uid: uid.to_string(),
                 sample_rate,
@@ -213,6 +228,7 @@ impl PluginHost {
             id,
             PluginInstance {
                 id,
+                format,
                 uid: uid.to_string(),
                 path: path.to_path_buf(),
                 name,
@@ -239,14 +255,40 @@ impl PluginHost {
     }
 
     pub fn set_param(&mut self, id: PluginInstanceId, param_id: u32, value: f32) {
+        self.set_param_inner(id, param_id, value, false);
+    }
+
+    fn set_param_normalized(&mut self, id: PluginInstanceId, param_id: u32, value: f32) {
+        self.set_param_inner(id, param_id, value, true);
+    }
+
+    fn set_param_inner(
+        &mut self,
+        id: PluginInstanceId,
+        param_id: u32,
+        value: f32,
+        normalized: bool,
+    ) {
         if let Some(inst) = self.instances.get_mut(&id) {
-            inst.param_values.insert(param_id, value);
+            let display_value = if normalized {
+                inst.params
+                    .iter()
+                    .find(|parameter| parameter.id == param_id)
+                    .map(|parameter| {
+                        parameter.min + value.clamp(0.0, 1.0) * (parameter.max - parameter.min)
+                    })
+                    .unwrap_or(value)
+            } else {
+                value
+            };
+            inst.param_values.insert(param_id, display_value);
             if let Some(stream) = inst.stream.as_mut() {
                 let _ = send(
                     stream,
                     &HostToWorker::SetParam {
                         id: param_id,
                         value,
+                        normalized,
                     },
                 );
             }
@@ -289,14 +331,14 @@ impl PluginHost {
         block_size: u32,
         state: Option<Vec<u8>>,
     ) -> Result<()> {
-        let (uid, path) = {
+        let (format, uid, path) = {
             let inst = self
                 .instances
                 .get(&id)
                 .ok_or_else(|| anyhow!("missing instance"))?;
-            (inst.uid.clone(), inst.path.clone())
+            (inst.format, inst.uid.clone(), inst.path.clone())
         };
-        self.load(id, &uid, &path, sample_rate, block_size, state)
+        self.load(id, format, &uid, &path, sample_rate, block_size, state)
     }
 }
 
@@ -388,6 +430,8 @@ impl PluginInstance {
         let transport = TransportInfo {
             sample_rate: ctx.sample_rate as f64,
             tempo: ctx.bpm,
+            time_sig_numerator: ctx.time_sig_numerator,
+            time_sig_denominator: ctx.time_sig_denominator,
             project_time_samples: ctx.block_start.0,
             playing: ctx.playing,
             cycle: false,
@@ -511,7 +555,7 @@ impl PluginAudioHost for HostPluginAudio {
         let Some(mut host) = self.inner.try_lock() else {
             return;
         };
-        let _ = host.set_param(instance, param_id, value);
+        host.set_param_normalized(instance, param_id, value);
     }
 }
 

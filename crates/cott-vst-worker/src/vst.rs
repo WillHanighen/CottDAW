@@ -1,23 +1,65 @@
 use anyhow::{Context, Result, anyhow};
-use cott_ipc::{ParamInfo, PluginDescriptor, TransportInfo, posix::SharedAudioRegion};
+use cott_ipc::{
+    ParamInfo, PluginDescriptor, PluginFormat, TransportInfo, posix::SharedAudioRegion,
+};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use tracing::{info, warn};
+use truce_rack_clap::ClapScanner;
 use truce_rack_core::events::{Event, EventBody, EventList, MidiData};
 use truce_rack_core::info::PluginCategory;
-use truce_rack_core::plugin::{Plugin as _, PluginCore};
 use truce_rack_core::scanner::PluginScanner;
 use truce_rack_core::transport::TransportInfo as RackTransport;
 use truce_rack_core::{AudioBuffer as RackBuffer, BusLayout};
+use truce_rack_lv2::Lv2Scanner;
 use truce_rack_vst3::Vst3Scanner;
 
 use crate::x11_editor::FloatingEditorWindow;
 
 type LoadedVst = <Vst3Scanner as PluginScanner>::Plugin;
+type LoadedClap = <ClapScanner as PluginScanner>::Plugin;
+type LoadedLv2 = <Lv2Scanner as PluginScanner>::Plugin;
+
+enum RackPlugin {
+    Vst3(Box<LoadedVst>),
+    Clap(Box<LoadedClap>),
+    Lv2(Box<LoadedLv2>),
+}
+
+impl RackPlugin {
+    fn plugin(&self) -> &dyn truce_rack_core::plugin::Plugin<f32> {
+        match self {
+            Self::Vst3(plugin) => plugin.as_ref(),
+            Self::Clap(plugin) => plugin.as_ref(),
+            Self::Lv2(plugin) => plugin.as_ref(),
+        }
+    }
+
+    fn plugin_mut(&mut self) -> &mut dyn truce_rack_core::plugin::Plugin<f32> {
+        match self {
+            Self::Vst3(plugin) => plugin.as_mut(),
+            Self::Clap(plugin) => plugin.as_mut(),
+            Self::Lv2(plugin) => plugin.as_mut(),
+        }
+    }
+
+    fn pump_host_services(&mut self) {
+        if let Self::Vst3(plugin) = self {
+            plugin.pump_host_services();
+        }
+    }
+
+    fn latency_samples(&self) -> u32 {
+        match self {
+            Self::Vst3(plugin) => plugin.latency_samples(),
+            Self::Clap(_) | Self::Lv2(_) => 0,
+        }
+    }
+}
 
 pub struct VstPlugin {
-    plugin: LoadedVst,
+    plugin: RackPlugin,
     sample_rate: f64,
     block_size: usize,
     is_instrument: bool,
@@ -27,6 +69,109 @@ pub struct VstPlugin {
     latency: u32,
     /// Owned floating X11 parent when the host did not supply one.
     owned_editor: Option<FloatingEditorWindow>,
+}
+
+pub enum PluginBackend {
+    Rack(Box<VstPlugin>),
+    Vst2(Box<crate::vst2::Vst2Plugin>),
+}
+
+impl PluginBackend {
+    pub fn load(
+        format: PluginFormat,
+        path: &Path,
+        uid: &str,
+        sample_rate: f64,
+        block_size: u32,
+        state: Option<&[u8]>,
+    ) -> Result<Self> {
+        match format {
+            PluginFormat::Vst2 => Ok(Self::Vst2(Box::new(crate::vst2::Vst2Plugin::load(
+                path,
+                sample_rate,
+                block_size,
+                state,
+            )?))),
+            _ => Ok(Self::Rack(Box::new(VstPlugin::load(
+                format,
+                path,
+                uid,
+                sample_rate,
+                block_size,
+                state,
+            )?))),
+        }
+    }
+
+    pub fn meta(&mut self) -> (String, u32, Vec<ParamInfo>, bool, bool) {
+        match self {
+            Self::Rack(plugin) => plugin.meta(),
+            Self::Vst2(plugin) => plugin.descriptor_meta(),
+        }
+    }
+
+    pub fn params(&self) -> Vec<ParamInfo> {
+        match self {
+            Self::Rack(plugin) => plugin.params(),
+            Self::Vst2(plugin) => plugin.params(),
+        }
+    }
+
+    pub fn set_param(&mut self, id: u32, value: f32, normalized: bool) {
+        match self {
+            Self::Rack(plugin) => plugin.set_param(id, value, normalized),
+            Self::Vst2(plugin) => plugin.set_param(id, value),
+        }
+    }
+
+    pub fn get_state(&self) -> Vec<u8> {
+        match self {
+            Self::Rack(plugin) => plugin.get_state(),
+            Self::Vst2(plugin) => plugin.get_state(),
+        }
+    }
+
+    pub fn set_state(&mut self, data: &[u8]) {
+        match self {
+            Self::Rack(plugin) => plugin.set_state(data),
+            Self::Vst2(plugin) => plugin.set_state(data),
+        }
+    }
+
+    pub fn latency(&self) -> u32 {
+        match self {
+            Self::Rack(plugin) => plugin.latency(),
+            Self::Vst2(plugin) => plugin.latency(),
+        }
+    }
+
+    pub fn open_editor(&mut self, parent_x11: Option<u64>) -> Result<()> {
+        match self {
+            Self::Rack(plugin) => plugin.open_editor(parent_x11),
+            Self::Vst2(plugin) => plugin.open_editor(parent_x11),
+        }
+    }
+
+    pub fn close_editor(&mut self) {
+        match self {
+            Self::Rack(plugin) => plugin.close_editor(),
+            Self::Vst2(plugin) => plugin.close_editor(),
+        }
+    }
+
+    pub fn pump_editor(&mut self) -> bool {
+        match self {
+            Self::Rack(plugin) => plugin.pump_editor(),
+            Self::Vst2(plugin) => plugin.pump_editor(),
+        }
+    }
+
+    pub fn process(&mut self, shm: &mut SharedAudioRegion, transport: &TransportInfo) -> bool {
+        match self {
+            Self::Rack(plugin) => plugin.process(shm, transport),
+            Self::Vst2(plugin) => plugin.process(shm, transport),
+        }
+    }
 }
 
 pub fn scan_paths(paths: &[PathBuf]) -> Result<Vec<PluginDescriptor>> {
@@ -43,7 +188,11 @@ pub fn scan_paths(paths: &[PathBuf]) -> Result<Vec<PluginDescriptor>> {
         // and can hang / spam desktop notifications. List from the filesystem;
         // real factory IDs are resolved on load.
         if looks_like_yabridge(&bundle) {
-            let desc = descriptor_from_bundle_path(&bundle, /*prefer_instrument*/ true);
+            let desc = descriptor_from_bundle_path(
+                &bundle,
+                PluginFormat::Vst3,
+                /*prefer_instrument*/ true,
+            );
             if !out.iter().any(|d| d.path == desc.path) {
                 out.push(desc);
             }
@@ -60,8 +209,15 @@ pub fn scan_paths(paths: &[PathBuf]) -> Result<Vec<PluginDescriptor>> {
                 }
             }
             Err(e) => {
-                warn!("native scan {}: {e:#} — listing by path only", bundle.display());
-                let desc = descriptor_from_bundle_path(&bundle, /*prefer_instrument*/ false);
+                warn!(
+                    "native scan {}: {e:#} — listing by path only",
+                    bundle.display()
+                );
+                let desc = descriptor_from_bundle_path(
+                    &bundle,
+                    PluginFormat::Vst3,
+                    /*prefer_instrument*/ false,
+                );
                 if !out.iter().any(|d| d.path == desc.path) {
                     out.push(desc);
                 }
@@ -69,8 +225,96 @@ pub fn scan_paths(paths: &[PathBuf]) -> Result<Vec<PluginDescriptor>> {
         }
     }
 
-    info!("catalogued {} VST3 bundles (yabridge deferred until load)", out.len());
+    scan_clap_plugins(&mut out);
+    scan_lv2_plugins(&mut out);
+    out.extend(crate::vst2::scan_paths(&standard_vst2_dirs()));
+    deduplicate_catalog(&mut out);
+    info!("catalogued {} plugins across VST2/VST3/CLAP/LV2", out.len());
     Ok(out)
+}
+
+fn scan_clap_plugins(out: &mut Vec<PluginDescriptor>) {
+    let scanner = ClapScanner::new();
+    for dir in standard_clap_dirs() {
+        let mut scan_dirs = Vec::new();
+        collect_non_bundle_dirs(&dir, ".clap", &mut scan_dirs);
+        for scan_dir in scan_dirs {
+            let Ok(infos) = scanner.scan_path(&scan_dir) else {
+                continue;
+            };
+            for info in infos {
+                let desc = info_to_desc(&info, PluginFormat::Clap);
+                if !out
+                    .iter()
+                    .any(|existing| existing.format == desc.format && existing.uid == desc.uid)
+                {
+                    out.push(desc);
+                }
+            }
+        }
+        // Defer yabridge CLAP factory startup until the user loads it.
+        collect_deferred_clap_wrappers(&dir, out);
+    }
+}
+
+fn scan_lv2_plugins(out: &mut Vec<PluginDescriptor>) {
+    match Lv2Scanner::new().scan() {
+        Ok(infos) => out.extend(
+            infos
+                .iter()
+                .map(|info| info_to_desc(info, PluginFormat::Lv2)),
+        ),
+        Err(err) => warn!("LV2 scan failed: {err}"),
+    }
+}
+
+fn collect_non_bundle_dirs(dir: &Path, extension: &str, out: &mut Vec<PathBuf>) {
+    if !dir.is_dir()
+        || dir
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.ends_with(extension))
+    {
+        return;
+    }
+    if !looks_like_yabridge_path(dir) {
+        out.push(dir.to_owned());
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if entry.path().is_dir() {
+            collect_non_bundle_dirs(&entry.path(), extension, out);
+        }
+    }
+}
+
+fn collect_deferred_clap_wrappers(dir: &Path, out: &mut Vec<PluginDescriptor>) {
+    if !dir.is_dir() {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_deferred_clap_wrappers(&path, out);
+        } else if path.extension().and_then(|ext| ext.to_str()) == Some("clap")
+            && looks_like_yabridge_path(&path)
+        {
+            let desc = descriptor_from_bundle_path(&path, PluginFormat::Clap, true);
+            if !out.iter().any(|existing| existing.path == desc.path) {
+                out.push(desc);
+            }
+        }
+    }
+}
+
+fn deduplicate_catalog(catalog: &mut Vec<PluginDescriptor>) {
+    let mut seen = std::collections::HashSet::new();
+    catalog.retain(|plugin| seen.insert((plugin.format, plugin.uid.clone(), plugin.path.clone())));
 }
 
 fn standard_vst3_dirs() -> Vec<PathBuf> {
@@ -81,6 +325,43 @@ fn standard_vst3_dirs() -> Vec<PathBuf> {
     if let Some(home) = std::env::var_os("HOME") {
         dirs.push(PathBuf::from(home).join(".vst3"));
     }
+    if let Some(extra) = std::env::var_os("VST3_PATH") {
+        dirs.extend(std::env::split_paths(&extra));
+    }
+    dirs.sort();
+    dirs.dedup();
+    dirs
+}
+
+fn standard_vst2_dirs() -> Vec<PathBuf> {
+    let mut dirs = vec![
+        PathBuf::from("/usr/lib/vst"),
+        PathBuf::from("/usr/local/lib/vst"),
+    ];
+    if let Some(home) = std::env::var_os("HOME") {
+        dirs.push(PathBuf::from(home).join(".vst"));
+    }
+    if let Some(extra) = std::env::var_os("VST_PATH") {
+        dirs.extend(std::env::split_paths(&extra));
+    }
+    dirs.sort();
+    dirs.dedup();
+    dirs
+}
+
+fn standard_clap_dirs() -> Vec<PathBuf> {
+    let mut dirs = vec![
+        PathBuf::from("/usr/lib/clap"),
+        PathBuf::from("/usr/local/lib/clap"),
+    ];
+    if let Some(home) = std::env::var_os("HOME") {
+        dirs.push(PathBuf::from(home).join(".clap"));
+    }
+    if let Some(extra) = std::env::var_os("CLAP_PATH") {
+        dirs.extend(std::env::split_paths(&extra));
+    }
+    dirs.sort();
+    dirs.dedup();
     dirs
 }
 
@@ -144,18 +425,26 @@ fn is_vst3_bundle(path: &Path) -> bool {
 }
 
 fn looks_like_yabridge(bundle: &Path) -> bool {
+    looks_like_yabridge_path(bundle)
+}
+
+pub(crate) fn looks_like_yabridge_path(bundle: &Path) -> bool {
     bundle.components().any(|c| c.as_os_str() == "yabridge")
         || bundle.join("Contents").join("x86_64-win").is_dir()
         || bundle.join("Contents").join("x86-win").is_dir()
 }
 
-fn path_uid(path: &Path) -> String {
+pub(crate) fn stable_path_hash(path: &Path) -> String {
     let mut hasher = DefaultHasher::new();
     path.to_string_lossy().hash(&mut hasher);
-    format!("path:{:016x}", hasher.finish())
+    format!("{:016x}", hasher.finish())
 }
 
-fn descriptor_from_bundle_path(bundle: &Path, prefer_instrument: bool) -> PluginDescriptor {
+fn descriptor_from_bundle_path(
+    bundle: &Path,
+    format: PluginFormat,
+    prefer_instrument: bool,
+) -> PluginDescriptor {
     let name = bundle
         .file_stem()
         .and_then(|s| s.to_str())
@@ -168,8 +457,11 @@ fn descriptor_from_bundle_path(bundle: &Path, prefer_instrument: bool) -> Plugin
     } else {
         prefer_instrument
     };
+    let ambiguous = !crate::classify::name_looks_like_instrument(&name)
+        && !crate::classify::name_looks_like_effect(&name);
     PluginDescriptor {
-        uid: path_uid(bundle),
+        format,
+        uid: format!("{}-path:{}", format.as_str(), stable_path_hash(bundle)),
         name,
         vendor: if looks_like_yabridge(bundle) {
             "yabridge".into()
@@ -178,7 +470,9 @@ fn descriptor_from_bundle_path(bundle: &Path, prefer_instrument: bool) -> Plugin
         },
         path: bundle.to_path_buf(),
         is_instrument,
-        is_effect: !is_instrument,
+        // Deferred yabridge entries may not expose category metadata until Wine
+        // starts. Ambiguous names are offered in both browser sections.
+        is_effect: !is_instrument || ambiguous,
         has_editor: true,
     }
 }
@@ -207,11 +501,19 @@ fn scan_one_bundle(
 }
 
 fn info_to_desc_no_reprobe(info: &truce_rack_core::info::PluginInfo) -> PluginDescriptor {
+    info_to_desc(info, PluginFormat::Vst3)
+}
+
+fn info_to_desc(
+    info: &truce_rack_core::info::PluginInfo,
+    format: PluginFormat,
+) -> PluginDescriptor {
     // Do not re-open the module here (that re-triggers yabridge/Wine).
     let is_instrument = matches!(info.category, PluginCategory::Instrument)
         || info.accepts_midi
         || crate::classify::name_looks_like_instrument(&info.name);
     PluginDescriptor {
+        format,
         uid: info.unique_id.clone(),
         name: info.name.clone(),
         vendor: info.vendor.clone(),
@@ -252,45 +554,92 @@ fn pick_plugin_info(
     ))
 }
 
+fn scan_one_clap(
+    plugin_path: &Path,
+) -> Result<(tempfile::TempDir, Vec<truce_rack_core::info::PluginInfo>)> {
+    let scanner = ClapScanner::new();
+    let tmp = tempfile::tempdir().context("temp dir for isolated CLAP scan")?;
+    let link = tmp.path().join(
+        plugin_path
+            .file_name()
+            .ok_or_else(|| anyhow!("CLAP path has no file name"))?,
+    );
+    std::os::unix::fs::symlink(plugin_path, &link).context("symlink CLAP for isolated scan")?;
+    let mut infos = scanner
+        .scan_path(tmp.path())
+        .map_err(|err| anyhow!("scan CLAP: {err}"))?;
+    for info in &mut infos {
+        info.path = plugin_path.to_owned();
+    }
+    Ok((tmp, infos))
+}
+
 impl VstPlugin {
     pub fn load(
+        format: PluginFormat,
         path: &Path,
         uid: &str,
         sample_rate: f64,
         block_size: u32,
         state: Option<&[u8]>,
     ) -> Result<Self> {
-        let scanner = Vst3Scanner::new();
-        // Only open THIS bundle — never scan a whole yabridge directory.
-        let (_tmp_guard, infos) = if path.exists() && is_vst3_bundle(path) {
-            scan_one_bundle(path).context("load: isolated bundle scan")?
-        } else if path.exists() {
-            let parent = path.parent().unwrap_or(path);
-            let list = scanner
-                .scan_path(parent)
-                .map_err(|e| anyhow!("scan parent: {e}"))?;
-            (tempfile::tempdir().context("dummy temp")?, list)
-        } else {
-            return Err(anyhow!("plugin path missing: {}", path.display()));
+        let (info, mut plugin) = match format {
+            PluginFormat::Vst3 => {
+                let scanner = Vst3Scanner::new();
+                // Only open THIS bundle — never scan a whole yabridge directory.
+                let (_tmp_guard, infos) = if path.exists() && is_vst3_bundle(path) {
+                    scan_one_bundle(path).context("load: isolated VST3 scan")?
+                } else if path.exists() {
+                    let parent = path.parent().unwrap_or(path);
+                    let list = scanner
+                        .scan_path(parent)
+                        .map_err(|e| anyhow!("scan VST3 parent: {e}"))?;
+                    (tempfile::tempdir().context("dummy temp")?, list)
+                } else {
+                    return Err(anyhow!("plugin path missing: {}", path.display()));
+                };
+                let info = pick_plugin_info(infos, uid, path)?;
+                let plugin = scanner.load(&info).context("load VST3")?;
+                (info, RackPlugin::Vst3(Box::new(plugin)))
+            }
+            PluginFormat::Clap => {
+                if !path.exists() {
+                    return Err(anyhow!("plugin path missing: {}", path.display()));
+                }
+                let scanner = ClapScanner::new();
+                let (_tmp_guard, infos) =
+                    scan_one_clap(path).context("load: isolated CLAP scan")?;
+                let info = pick_plugin_info(infos, uid, path)?;
+                let plugin = scanner.load(&info).context("load CLAP")?;
+                (info, RackPlugin::Clap(Box::new(plugin)))
+            }
+            PluginFormat::Lv2 => {
+                let scanner = Lv2Scanner::new();
+                let infos = scanner.scan().context("scan LV2 world")?;
+                let info = pick_plugin_info(infos, uid, path)?;
+                let plugin = scanner.load(&info).context("load LV2")?;
+                (info, RackPlugin::Lv2(Box::new(plugin)))
+            }
+            PluginFormat::Vst2 => return Err(anyhow!("VST2 uses the legacy backend")),
         };
-        let info = pick_plugin_info(infos, uid, path)?;
-        let mut plugin = scanner.load(&info).context("load vst3")?;
         let layout = plugin
+            .plugin()
             .supported_layouts()
             .first()
             .cloned()
             .unwrap_or_else(BusLayout::stereo);
         plugin
+            .plugin_mut()
             .activate(layout, sample_rate, block_size as usize)
             .context("activate")?;
-        if let Some(bytes) = state {
-            if !bytes.is_empty() {
-                let _ = plugin.load_state(bytes);
-            }
+        if let Some(bytes) = state
+            && !bytes.is_empty()
+        {
+            let _ = plugin.plugin_mut().load_state(bytes);
         }
         let mut params = Vec::new();
-        for i in 0..plugin.parameter_count() {
-            if let Ok(p) = plugin.parameter_info(i) {
+        for i in 0..plugin.plugin().parameter_count() {
+            if let Ok(p) = plugin.plugin().parameter_info(i) {
                 params.push(ParamInfo {
                     id: p.id,
                     name: p.name,
@@ -308,7 +657,9 @@ impl VstPlugin {
             || info.accepts_midi
             || crate::classify::name_looks_like_instrument(&info.name);
         let has_editor = info.has_editor;
-        info!("loaded VST3 {name} instrument={is_instrument} editor={has_editor} latency={latency}");
+        info!(
+            "loaded {format} {name} instrument={is_instrument} editor={has_editor} latency={latency}"
+        );
         Ok(Self {
             plugin,
             sample_rate,
@@ -336,18 +687,24 @@ impl VstPlugin {
         self.params.clone()
     }
 
-    pub fn set_param(&mut self, id: u32, value: f32) {
+    pub fn set_param(&mut self, id: u32, value: f32, normalized: bool) {
         if let Some(idx) = self.params.iter().position(|p| p.id == id) {
-            let _ = self.plugin.set_parameter(idx, value as f64);
+            let parameter = &self.params[idx];
+            let value = if normalized {
+                parameter.min + value.clamp(0.0, 1.0) * (parameter.max - parameter.min)
+            } else {
+                value.clamp(parameter.min, parameter.max)
+            };
+            let _ = self.plugin.plugin_mut().set_parameter(idx, value as f64);
         }
     }
 
     pub fn get_state(&self) -> Vec<u8> {
-        self.plugin.save_state().unwrap_or_default()
+        self.plugin.plugin().save_state().unwrap_or_default()
     }
 
     pub fn set_state(&mut self, data: &[u8]) {
-        let _ = self.plugin.load_state(data);
+        let _ = self.plugin.plugin_mut().load_state(data);
     }
 
     pub fn latency(&self) -> u32 {
@@ -380,6 +737,7 @@ impl VstPlugin {
         let preferred_size = {
             let editor = self
                 .plugin
+                .plugin_mut()
                 .editor()
                 .ok_or_else(|| anyhow!("plugin has no editor"))?;
             editor
@@ -400,8 +758,8 @@ impl VstPlugin {
     }
 
     pub fn close_editor(&mut self) {
-        if let Some(editor) = self.plugin.editor() {
-            let _ = editor.close();
+        if let Some(editor) = self.plugin.plugin_mut().editor() {
+            editor.close();
         }
         self.owned_editor = None;
     }
@@ -421,13 +779,13 @@ impl VstPlugin {
             }
         };
         if closed {
-            if let Some(editor) = self.plugin.editor() {
-                let _ = editor.close();
+            if let Some(editor) = self.plugin.plugin_mut().editor() {
+                editor.close();
             }
             self.owned_editor = None;
             return false;
         }
-        if let Some(editor) = self.plugin.editor() {
+        if let Some(editor) = self.plugin.plugin_mut().editor() {
             editor.on_idle();
         }
         true
@@ -510,9 +868,18 @@ impl VstPlugin {
         let bus_out = [truce_rack_core::buffer::BusRange::new(0, 2)];
         let mut buffer = RackBuffer::new(&input_refs, &mut output_refs, frames, &bus_in, &bus_out);
 
+        let song_position_beats =
+            transport.project_time_samples as f64 / transport.sample_rate * transport.tempo / 60.0;
+        let beats_per_bar = transport.time_sig_numerator as f64 * 4.0
+            / transport.time_sig_denominator.max(1) as f64;
         let rack_transport = RackTransport {
             tempo_bpm: Some(transport.tempo),
+            time_signature: Some((transport.time_sig_numerator, transport.time_sig_denominator)),
+            song_position_beats: Some(song_position_beats),
             song_position_samples: Some(transport.project_time_samples),
+            bar_start_beats: Some(
+                (song_position_beats / beats_per_bar.max(1.0)).floor() * beats_per_bar,
+            ),
             playing: transport.playing,
             loop_active: transport.cycle,
             ..Default::default()
@@ -526,7 +893,11 @@ impl VstPlugin {
             output_events: &mut output_events,
         };
 
-        let ok = match self.plugin.process(&mut buffer, &events, &mut ctx) {
+        let ok = match self
+            .plugin
+            .plugin_mut()
+            .process(&mut buffer, &events, &mut ctx)
+        {
             Ok(status) => !matches!(status, truce_rack_core::plugin::ProcessStatus::Error),
             Err(_) => false,
         };
@@ -552,17 +923,14 @@ mod tests {
 
     #[test]
     fn expands_vendor_subfolders_but_skips_bundles() {
-        let root = std::env::temp_dir().join(format!(
-            "cott-vst-scan-test-{}",
-            std::process::id()
-        ));
+        let root = std::env::temp_dir().join(format!("cott-vst-scan-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         let vendor = root.join("Vendor");
         let nested = vendor.join("Nested");
         let bundle = nested.join("CoolSynth.vst3");
         fs::create_dir_all(bundle.join("Contents")).unwrap();
 
-        let dirs = expand_vst3_scan_dirs(&[root.clone()]);
+        let dirs = expand_vst3_scan_dirs(std::slice::from_ref(&root));
         assert!(dirs.iter().any(|d| d == &root));
         assert!(dirs.iter().any(|d| d == &vendor));
         assert!(dirs.iter().any(|d| d == &nested));
@@ -574,10 +942,8 @@ mod tests {
 
     #[test]
     fn does_not_treat_dot_vst3_root_as_bundle() {
-        let root = std::env::temp_dir().join(format!(
-            "cott-vst-root-test-{}/.vst3",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("cott-vst-root-test-{}/.vst3", std::process::id()));
         let _ = fs::remove_dir_all(root.parent().unwrap());
         let yabridge = root.join("yabridge");
         let bundle = yabridge.join("Pluto.vst3");
@@ -586,8 +952,11 @@ mod tests {
         assert!(!is_vst3_bundle(&root));
         assert!(is_vst3_bundle(&bundle));
 
-        let dirs = expand_vst3_scan_dirs(&[root.clone()]);
-        assert!(dirs.iter().any(|d| d == &root), "root .vst3 must be scanned");
+        let dirs = expand_vst3_scan_dirs(std::slice::from_ref(&root));
+        assert!(
+            dirs.iter().any(|d| d == &root),
+            "root .vst3 must be scanned"
+        );
         assert!(
             dirs.iter().any(|d| d == &yabridge),
             "yabridge subfolder must be scanned"
@@ -607,10 +976,16 @@ mod tests {
             .count();
         // Should be instant filesystem listing — no Wine.
         assert!(
-            yabridge > 0 || !PathBuf::from(std::env::var("HOME").unwrap()).join(".vst3/yabridge").exists(),
+            yabridge > 0
+                || !PathBuf::from(std::env::var("HOME").unwrap())
+                    .join(".vst3/yabridge")
+                    .exists(),
             "expected yabridge plugins when ~/.vst3/yabridge exists"
         );
-        eprintln!("catalogued {} plugins ({} yabridge)", plugins.len(), yabridge);
+        eprintln!(
+            "catalogued {} plugins ({} yabridge)",
+            plugins.len(),
+            yabridge
+        );
     }
 }
-

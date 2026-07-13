@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use thiserror::Error;
 use uuid::Uuid;
 
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 pub const MAX_BLOCK_FRAMES: usize = 4096;
 pub const MAX_CHANNELS: usize = 2;
 pub const MAX_MIDI_EVENTS: usize = 512;
@@ -31,8 +31,35 @@ pub enum IpcError {
     Other(String),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PluginFormat {
+    Vst2,
+    Vst3,
+    Clap,
+    Lv2,
+}
+
+impl PluginFormat {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Vst2 => "vst2",
+            Self::Vst3 => "vst3",
+            Self::Clap => "clap",
+            Self::Lv2 => "lv2",
+        }
+    }
+}
+
+impl std::fmt::Display for PluginFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginDescriptor {
+    pub format: PluginFormat,
     pub uid: String,
     pub name: String,
     pub vendor: String,
@@ -55,6 +82,8 @@ pub struct ParamInfo {
 pub struct TransportInfo {
     pub sample_rate: f64,
     pub tempo: f64,
+    pub time_sig_numerator: u32,
+    pub time_sig_denominator: u32,
     pub project_time_samples: i64,
     pub playing: bool,
     pub cycle: bool,
@@ -70,6 +99,7 @@ pub enum HostToWorker {
         paths: Vec<PathBuf>,
     },
     Load {
+        format: PluginFormat,
         path: PathBuf,
         uid: String,
         sample_rate: f64,
@@ -80,6 +110,7 @@ pub enum HostToWorker {
     SetParam {
         id: u32,
         value: f32,
+        normalized: bool,
     },
     GetParams,
     GetState,
@@ -275,12 +306,24 @@ pub mod posix {
         pub fn create(name: &str) -> Result<Self, IpcError> {
             let layout = ShmLayout::new();
             let cname = CString::new(name).map_err(|e| IpcError::Shm(e.to_string()))?;
-            let fd = shm_open(
-                cname.as_c_str(),
-                OFlag::O_CREAT | OFlag::O_RDWR | OFlag::O_EXCL,
-                Mode::S_IRUSR | Mode::S_IWUSR,
-            )
-            .map_err(|e| IpcError::Shm(e.to_string()))?;
+            let open_excl = || {
+                shm_open(
+                    cname.as_c_str(),
+                    OFlag::O_CREAT | OFlag::O_RDWR | OFlag::O_EXCL,
+                    Mode::S_IRUSR | Mode::S_IWUSR,
+                )
+            };
+            let fd = match open_excl() {
+                Ok(fd) => fd,
+                // A previous host process exited without unlinking this region
+                // (crash or hard kill). The name is unique to this plugin
+                // instance, so any leftover object is stale and safe to reclaim.
+                Err(nix::errno::Errno::EEXIST) => {
+                    shm_unlink(cname.as_c_str()).map_err(|e| IpcError::Shm(e.to_string()))?;
+                    open_excl().map_err(|e| IpcError::Shm(e.to_string()))?
+                }
+                Err(e) => return Err(IpcError::Shm(e.to_string())),
+            };
             ftruncate(&fd, layout.total_size as i64).map_err(|e| IpcError::Shm(e.to_string()))?;
             let ptr = unsafe {
                 mmap(
@@ -391,10 +434,10 @@ pub mod posix {
             unsafe {
                 let _ = munmap(self.ptr.cast(), self.size);
             }
-            if self.owner {
-                if let Ok(cname) = CString::new(self.name.as_str()) {
-                    let _ = shm_unlink(cname.as_c_str());
-                }
+            if self.owner
+                && let Ok(cname) = CString::new(self.name.as_str())
+            {
+                let _ = shm_unlink(cname.as_c_str());
             }
         }
     }

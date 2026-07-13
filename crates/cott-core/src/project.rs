@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
-pub const PROJECT_VERSION: u32 = 1;
+pub const PROJECT_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Asset {
@@ -185,9 +185,10 @@ impl Project {
         id
     }
 
-    pub fn attach_instrument(
+    pub fn attach_plugin_instrument(
         &mut self,
         track_id: TrackId,
+        plugin_format: String,
         plugin_uid: String,
         plugin_path: String,
         plugin_name: String,
@@ -210,7 +211,7 @@ impl Project {
         let mut unloaded: Option<PluginInstanceId> = None;
         if let Some(old_id) = old_instrument {
             if let Some(old) = self.graph.remove_node(old_id) {
-                if let NodeKind::Vst3Instrument { instance_id, .. } = old.kind {
+                if let NodeKind::PluginInstrument { instance_id, .. } = old.kind {
                     self.plugin_states.shift_remove(&instance_id);
                     unloaded = Some(instance_id);
                 }
@@ -221,8 +222,9 @@ impl Project {
         let inst = GraphNode {
             id: NodeId::new(),
             name: plugin_name.clone(),
-            kind: NodeKind::Vst3Instrument {
+            kind: NodeKind::PluginInstrument {
                 instance_id,
+                plugin_format,
                 plugin_uid: plugin_uid.clone(),
                 plugin_path,
                 plugin_name,
@@ -258,8 +260,25 @@ impl Project {
         Some((inst_id, unloaded))
     }
 
-    pub fn add_effect(
+    pub fn attach_instrument(
         &mut self,
+        track_id: TrackId,
+        plugin_uid: String,
+        plugin_path: String,
+        plugin_name: String,
+    ) -> Option<(NodeId, Option<PluginInstanceId>)> {
+        self.attach_plugin_instrument(
+            track_id,
+            "vst3".into(),
+            plugin_uid,
+            plugin_path,
+            plugin_name,
+        )
+    }
+
+    pub fn add_plugin_effect(
+        &mut self,
+        plugin_format: String,
         plugin_uid: String,
         plugin_path: String,
         plugin_name: String,
@@ -269,8 +288,13 @@ impl Project {
         // and auto-wiring before GainPan vs after GainPan into master is ambiguous
         // without an explicit target. Connect via the graph editor until then.
         let instance_id = PluginInstanceId::new();
-        let mut effect =
-            GraphNode::vst3_effect(instance_id, plugin_uid.clone(), plugin_path, plugin_name);
+        let mut effect = GraphNode::plugin_effect(
+            instance_id,
+            plugin_format,
+            plugin_uid.clone(),
+            plugin_path,
+            plugin_name,
+        );
         effect.position = position;
         let node_id = self.graph.add_node(effect);
         self.plugin_states.insert(
@@ -283,6 +307,22 @@ impl Project {
         );
         self.touch();
         node_id
+    }
+
+    pub fn add_effect(
+        &mut self,
+        plugin_uid: String,
+        plugin_path: String,
+        plugin_name: String,
+        position: [f32; 2],
+    ) -> NodeId {
+        self.add_plugin_effect(
+            "vst3".into(),
+            plugin_uid,
+            plugin_path,
+            plugin_name,
+            position,
+        )
     }
 
     pub fn compiled_plan(&self) -> CompiledPlan {
@@ -430,8 +470,8 @@ mod tests {
         assert_eq!(node.position, [120.0, 80.0]);
         assert_eq!(node.inputs.len(), 2);
         assert_eq!(node.outputs.len(), 2);
-        let NodeKind::Vst3Effect { instance_id, .. } = &node.kind else {
-            panic!("expected a VST3 effect node");
+        let NodeKind::PluginEffect { instance_id, .. } = &node.kind else {
+            panic!("expected a plugin effect node");
         };
         assert!(project.plugin_states.contains_key(instance_id));
     }
@@ -502,27 +542,17 @@ mod tests {
         let mut project = Project::new("Orphan");
         let track = project.add_midi_track("Synth");
         let (first_id, unloaded) = project
-            .attach_instrument(
-                track,
-                "a.uid".into(),
-                "/tmp/a.vst3".into(),
-                "A".into(),
-            )
+            .attach_instrument(track, "a.uid".into(), "/tmp/a.vst3".into(), "A".into())
             .expect("first attach");
         assert!(unloaded.is_none());
         let first_instance = match &project.graph.nodes[&first_id].kind {
-            NodeKind::Vst3Instrument { instance_id, .. } => *instance_id,
+            NodeKind::PluginInstrument { instance_id, .. } => *instance_id,
             other => panic!("expected instrument, got {other:?}"),
         };
         assert!(project.plugin_states.contains_key(&first_instance));
 
         let (second_id, unloaded) = project
-            .attach_instrument(
-                track,
-                "b.uid".into(),
-                "/tmp/b.vst3".into(),
-                "B".into(),
-            )
+            .attach_instrument(track, "b.uid".into(), "/tmp/b.vst3".into(), "B".into())
             .expect("second attach");
         assert_eq!(unloaded, Some(first_instance));
         assert!(!project.graph.nodes.contains_key(&first_id));
@@ -530,5 +560,30 @@ mod tests {
         assert!(!project.plugin_states.contains_key(&first_instance));
         let track_ref = project.tracks.iter().find(|t| t.id == track).unwrap();
         assert_eq!(track_ref.instrument_node, Some(second_id));
+    }
+
+    #[test]
+    fn version_one_vst3_node_migrates_to_generic_plugin_node() {
+        let mut project = Project::new("Migration");
+        let track = project.add_midi_track("Synth");
+        let (node_id, _) = project
+            .attach_instrument(
+                track,
+                "legacy.uid".into(),
+                "/tmp/legacy.vst3".into(),
+                "Legacy".into(),
+            )
+            .unwrap();
+        let node = &project.graph.nodes[&node_id];
+        let legacy_json = serde_json::to_string(node)
+            .unwrap()
+            .replace("\"PluginInstrument\"", "\"Vst3Instrument\"")
+            .replace("\"plugin_format\":\"vst3\",", "");
+
+        let migrated: GraphNode = serde_json::from_str(&legacy_json).unwrap();
+        let NodeKind::PluginInstrument { plugin_format, .. } = migrated.kind else {
+            panic!("expected migrated plugin instrument");
+        };
+        assert_eq!(plugin_format, "vst3");
     }
 }

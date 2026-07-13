@@ -3,7 +3,7 @@ name = "cott-daw"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "CottDAW — Linux Ableton-style DAW with sandboxed VST3"
+description = "CottDAW — Linux Ableton-style DAW with sandboxed VST2/VST3/CLAP/LV2"
 
 [[bin]]
 name = "cott-daw"

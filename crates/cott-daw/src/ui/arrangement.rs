@@ -119,6 +119,19 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
         }
     });
 
+    // Deferred track/clip edits — applied after the scroll area so we never
+    // mutate the project (or app selections) while iterating cloned tracks.
+    let mut pending_delete_track: Option<cott_core::ids::TrackId> = None;
+    let mut pending_move_clip: Option<(cott_core::ids::ClipId, cott_core::ids::TrackId)> = None;
+    let mut pending_start_rename: Option<(cott_core::ids::TrackId, String)> = None;
+    let mut pending_rename_commit: Option<(cott_core::ids::TrackId, String)> = None;
+    let track_list: Vec<(cott_core::ids::TrackId, String, TrackKind)> = app
+        .project
+        .tracks
+        .iter()
+        .map(|t| (t.id, t.name.clone(), t.kind))
+        .collect();
+
     egui::ScrollArea::vertical().show(ui, |ui| {
         let tracks: Vec<_> = app.project.tracks.iter().cloned().collect();
         for track in tracks {
@@ -141,8 +154,51 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
                             .fill(fill)
                             .inner_margin(6.0)
                             .show(ui, |ui| {
-                                if ui.selectable_label(selected, &track.name).clicked() {
-                                    app.ui.selected_track = Some(track.id);
+                                let editing = matches!(
+                                    &app.ui.renaming_track,
+                                    Some((rid, _)) if *rid == track.id
+                                );
+                                if editing {
+                                    let mut commit = false;
+                                    let mut cancel = false;
+                                    if let Some((_, buf)) = app.ui.renaming_track.as_mut() {
+                                        let resp = ui.add(
+                                            egui::TextEdit::singleline(buf)
+                                                .desired_width(track_header_w - 12.0),
+                                        );
+                                        resp.request_focus();
+                                        if ui.input(|i| i.key_pressed(egui::Key::Enter))
+                                            || resp.clicked_elsewhere()
+                                        {
+                                            commit = true;
+                                        } else if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                                            cancel = true;
+                                        }
+                                    }
+                                    if commit {
+                                        if let Some((rid, buf)) = app.ui.renaming_track.take() {
+                                            pending_rename_commit = Some((rid, buf));
+                                        }
+                                    } else if cancel {
+                                        app.ui.renaming_track = None;
+                                    }
+                                } else {
+                                    let label = ui.selectable_label(selected, &track.name);
+                                    if label.clicked() {
+                                        app.ui.selected_track = Some(track.id);
+                                    }
+                                    label.context_menu(|ui| {
+                                        if ui.button("Rename").clicked() {
+                                            pending_start_rename =
+                                                Some((track.id, track.name.clone()));
+                                            ui.close_menu();
+                                        }
+                                        ui.separator();
+                                        if ui.button("Delete track").clicked() {
+                                            pending_delete_track = Some(track.id);
+                                            ui.close_menu();
+                                        }
+                                    });
                                 }
                                 ui.label(match track.kind {
                                     TrackKind::Midi => "MIDI",
@@ -197,23 +253,35 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
                                         app.ui.selected_node = Some(gain_id);
                                     }
                                 }
-                                if ui.small_button("+ Clip").clicked() {
-                                    app.ui.selected_track = Some(track.id);
-                                    let start = app.playhead_beats();
-                                    let bar = app.project.tempo.bar_length_beats();
-                                    let clip = match track.kind {
-                                        TrackKind::Midi => {
-                                            Clip::new_midi(track.id, "Clip", start, bar)
+                                ui.horizontal(|ui| {
+                                    if ui.small_button("+ Clip").clicked() {
+                                        app.ui.selected_track = Some(track.id);
+                                        let start = app.playhead_beats();
+                                        let bar = app.project.tempo.bar_length_beats();
+                                        match track.kind {
+                                            TrackKind::Midi => {
+                                                let clip =
+                                                    Clip::new_midi(track.id, "Clip", start, bar);
+                                                app.commands.push(
+                                                    &mut app.project,
+                                                    Command::AddClip { clip },
+                                                );
+                                                app.sync_engine();
+                                            }
+                                            TrackKind::Audio => {
+                                                app.status =
+                                                    "Import audio onto audio tracks".into();
+                                            }
                                         }
-                                        TrackKind::Audio => {
-                                            app.status = "Import audio onto audio tracks".into();
-                                            return;
-                                        }
-                                    };
-                                    app.commands
-                                        .push(&mut app.project, Command::AddClip { clip });
-                                    app.sync_engine();
-                                }
+                                    }
+                                    if ui
+                                        .small_button("🗑")
+                                        .on_hover_text("Delete this track")
+                                        .clicked()
+                                    {
+                                        pending_delete_track = Some(track.id);
+                                    }
+                                });
                             });
                         // Pin width even if controls are narrower than the strip.
                         ui.expand_to_include_x(ui.min_rect().left() + track_header_w);
@@ -342,9 +410,30 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
                         ui.id().with(("clip", clip_id)),
                         egui::Sense::click_and_drag(),
                     );
+                    let clip_is_midi = matches!(clip.content, ClipContent::Midi { .. });
+                    let clip_track_id = clip.track_id;
                     clip_resp.context_menu(|ui| {
                         ui.label(&clip.name);
                         ui.separator();
+                        ui.menu_button("Move to track", |ui| {
+                            let mut any = false;
+                            for (tid, tname, tkind) in &track_list {
+                                if *tid == clip_track_id {
+                                    continue;
+                                }
+                                if matches!(tkind, TrackKind::Midi) != clip_is_midi {
+                                    continue;
+                                }
+                                any = true;
+                                if ui.button(tname).clicked() {
+                                    pending_move_clip = Some((clip_id, *tid));
+                                    ui.close_menu();
+                                }
+                            }
+                            if !any {
+                                ui.label("No compatible tracks");
+                            }
+                        });
                         if ui.button("Delete clip").clicked() {
                             delete_clip = Some(clip_id);
                             ui.close_menu();
@@ -422,6 +511,20 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
             });
         }
     });
+
+    // Apply deferred track/clip edits now that the scroll area released `app`.
+    if let Some((tid, buf)) = pending_rename_commit {
+        app.rename_track(tid, buf);
+    }
+    if let Some((tid, name)) = pending_start_rename {
+        app.ui.renaming_track = Some((tid, name));
+    }
+    if let Some((clip_id, tid)) = pending_move_clip {
+        app.move_clip_to_track(clip_id, tid);
+    }
+    if let Some(tid) = pending_delete_track {
+        app.remove_track(tid);
+    }
 }
 
 fn quantize_beat(beat: f64, step: f64) -> f64 {

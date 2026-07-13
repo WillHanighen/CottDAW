@@ -71,8 +71,10 @@ pub fn handle(app: &mut CottApp, ctx: &Context) {
                 app.remove_selected_graph_node();
             } else if app.ui.selected_clip.is_some() {
                 app.remove_selected_clip();
-            } else {
+            } else if app.ui.selected_node.is_some() {
                 app.remove_selected_graph_node();
+            } else if app.ui.selected_track.is_some() {
+                app.remove_selected_track();
             }
         }
         None => {}
