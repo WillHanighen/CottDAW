@@ -84,6 +84,10 @@ pub struct UiState {
     pub graph_connect_from: Option<(NodeId, PortId)>,
     /// Camera offset for the routing canvas (infinite pan).
     pub graph_pan: egui::Vec2,
+    /// Camera zoom for the routing canvas (1.0 = 100%).
+    pub graph_zoom: f32,
+    /// Previous canvas top-left; used to keep nodes stable when the panel resizes.
+    pub graph_canvas_origin: Option<egui::Pos2>,
     /// True while dragging empty canvas space to pan.
     pub graph_panning: bool,
     pub piano_drag: Option<PianoNoteDrag>,
@@ -111,6 +115,8 @@ impl Default for UiState {
             graph_drag_node: None,
             graph_connect_from: None,
             graph_pan: egui::Vec2::ZERO,
+            graph_zoom: 1.0,
+            graph_canvas_origin: None,
             graph_panning: false,
             piano_drag: None,
             piano_preview_pitch: None,
