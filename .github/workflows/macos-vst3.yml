@@ -1,0 +1,66 @@
+# Build CottSynth + CottFilter as universal (arm64 + x86_64) macOS VST3s.
+name: macOS VST3s
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "crates/cott-synth/**"
+      - "crates/cott-synth-dsp/**"
+      - "crates/cott-filter/**"
+      - "crates/cott-filter-dsp/**"
+      - "crates/cott-xtask/**"
+      - ".cargo/config.toml"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/macos-vst3.yml"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  package:
+    name: Bundle universal VST3s
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: macos-vst3-${{ hashFiles('Cargo.lock') }}
+
+      - name: Bundle CottSynth + CottFilter (universal)
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "10.13"
+        run: |
+          cargo run -p cott-xtask --release -- bundle-universal \
+            -p cott-synth -p cott-filter --release
+
+      - name: Ad-hoc codesign (Gatekeeper / Live)
+        run: |
+          for bundle in target/bundled/*.vst3; do
+            codesign --force --deep -s - "$bundle"
+          done
+
+      - name: Package artifacts
+        run: |
+          mkdir -p dist
+          cp -a target/bundled/cott-synth.vst3 dist/
+          cp -a target/bundled/cott-filter.vst3 dist/
+          cp -a scripts/INSTALL-macOS-VST3.txt dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cott-vst3-macos-universal
+          path: dist/

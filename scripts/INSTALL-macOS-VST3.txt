@@ -1,0 +1,12 @@
+CottSynth + CottFilter (macOS universal VST3)
+
+Install:
+  1. Copy cott-synth.vst3 and cott-filter.vst3
+  2. Move them into ~/Library/Audio/Plug-Ins/VST3/
+  3. Rescan plugins in your DAW
+
+If a host refuses to load unsigned plugins:
+  xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/cott-synth.vst3
+  xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/cott-filter.vst3
+  codesign --force --deep -s - ~/Library/Audio/Plug-Ins/VST3/cott-synth.vst3
+  codesign --force --deep -s - ~/Library/Audio/Plug-Ins/VST3/cott-filter.vst3

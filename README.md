@@ -64,6 +64,8 @@ cargo bundle-filter         # → target/bundled/cott-filter.vst3
 
 Copy those bundles into `~/.vst3/` (or another host’s VST3 path) to use them outside CottDAW. The DAW injects them into the plugin browser automatically (CottSynth = default MIDI instrument; CottFilter = stereo LP/HP effect).
 
+**macOS** (universal arm64 + x86_64): on a Mac run `./scripts/bundle-macos.sh`, or trigger the `macOS VST3s` GitHub Action and download the `cott-vst3-macos-universal` artifact. Install into `~/Library/Audio/Plug-Ins/VST3/` (see `scripts/INSTALL-macOS-VST3.txt`).
+
 ## Run
 
 ```bash
@@ -76,7 +78,7 @@ Logging uses the `RUST_LOG` env filter (defaults include `cott_daw=info` and `co
 
 ## Quick workflow
 
-1. Select a MIDI track (it already has **CottSynth**; its editor opens on startup).
+1. Select a MIDI track (it already has **CottSynth**). Open the editor from the routing view or Plugins menu when you want it.
 2. Click **+ Clip**, select the clip, draw notes in the Piano Roll (left-click add, right-click remove).
 3. Press Play (Space). Re-open the editor anytime from **Plugins** → **Open Native Editor**.
 4. CottSynth stays listed in the left browser; load anything else to replace it. Adjust gain on the track header.
