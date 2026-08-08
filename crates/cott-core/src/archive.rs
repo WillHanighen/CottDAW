@@ -226,6 +226,7 @@ pub fn unpack_archive(archive_path: &Path, workspace: &Path) -> Result<Project, 
     if project.meta.version < PROJECT_VERSION {
         project.meta.version = PROJECT_VERSION;
     }
+    project.graph.migrate_nodes();
     project.root_dir = Some(workspace.to_path_buf());
 
     for asset in project.assets.values_mut() {

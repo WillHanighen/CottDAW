@@ -3,6 +3,7 @@
 mod arrangement;
 mod export_dialog;
 mod graph_editor;
+mod node_editors;
 mod piano_roll;
 pub mod scale;
 mod shortcuts;
@@ -14,6 +15,7 @@ use crate::app::CottApp;
 use cott_core::clips::MidiNote;
 use cott_core::ids::{ClipId, NodeId, NoteId, PortId, TrackId};
 use eframe::egui;
+use indexmap::IndexSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LowerTab {
@@ -262,6 +264,8 @@ pub struct UiState {
     /// Export settings window (path chosen after confirm).
     pub show_export_dialog: bool,
     pub export_dialog: ExportDialogState,
+    /// Floating editors for built-in gain / mixer / splitter / synth nodes.
+    pub open_node_editors: IndexSet<NodeId>,
 }
 
 impl UiState {
@@ -315,6 +319,7 @@ impl Default for UiState {
             renaming_clip: None,
             show_export_dialog: false,
             export_dialog: ExportDialogState::default(),
+            open_node_editors: IndexSet::new(),
         }
     }
 }
@@ -329,6 +334,7 @@ pub fn draw(app: &mut CottApp, ctx: &egui::Context) {
     }
     transport::draw_top_bar(app, ctx);
     export_dialog::draw(app, ctx);
+    node_editors::draw(app, ctx);
 
     // Outermost bottom panel first so the status bar stays pinned to the screen edge.
     egui::TopBottomPanel::bottom("status")
@@ -446,7 +452,7 @@ fn draw_browser(app: &mut CottApp, ui: &mut egui::Ui) {
     ui.text_edit_singleline(&mut app.ui.plugin_filter)
         .on_hover_text("Filter VSTs");
     ui.weak("Click a plugin to load it, or right-click the routing canvas.");
-    ui.weak("CottSynth is always listed (built-in VST3).");
+    ui.weak("CottSynth + CottFilter are always listed (built-in VST3s).");
     if app.is_scanning_plugins() {
         ui.weak("Scanning… (filesystem only; Wine starts when you load a plugin)");
     }
@@ -513,7 +519,7 @@ fn draw_browser(app: &mut CottApp, ui: &mut egui::Ui) {
             }
         }
         if catalog_is_empty && !app.is_scanning_plugins() {
-            ui.weak("No third-party plugins found (CottSynth should still appear above)");
+            ui.weak("No third-party plugins found (built-ins should still appear above)");
         }
     });
 }
@@ -596,54 +602,19 @@ fn draw_plugin_inspector(app: &mut CottApp, ui: &mut egui::Ui) {
             Some(*instance_id)
         }
         cott_core::graph::NodeKind::BuiltinSynth { params } => {
+            if ui.button("Open editor window").clicked() {
+                node_editors::open_editor(app, node_id);
+            }
+            ui.separator();
             draw_builtin_synth_inspector(app, ui, node_id, *params);
             return;
         }
-        cott_core::graph::NodeKind::GainPan {
-            gain_db, pan, mute, ..
-        } => {
-            let mut g = *gain_db;
-            let mut p = *pan;
-            let mut m = *mute;
-            if ui
-                .add(egui::Slider::new(&mut g, -60.0..=12.0).text("Gain dB"))
-                .changed()
-            {
-                app.set_gain(node_id, g);
-            }
-            if ui
-                .add(egui::Slider::new(&mut p, -1.0..=1.0).text("Pan"))
-                .changed()
-            {
-                let old = (*gain_db, *pan, *mute);
-                app.commands.push(
-                    &mut app.project,
-                    cott_core::commands::Command::SetGainPan {
-                        node_id,
-                        old_gain: old.0,
-                        new_gain: old.0,
-                        old_pan: old.1,
-                        new_pan: p,
-                        old_mute: old.2,
-                        new_mute: old.2,
-                    },
-                );
-                app.sync_engine();
-            }
-            if ui.checkbox(&mut m, "Mute").changed() {
-                app.commands.push(
-                    &mut app.project,
-                    cott_core::commands::Command::SetGainPan {
-                        node_id,
-                        old_gain: *gain_db,
-                        new_gain: *gain_db,
-                        old_pan: *pan,
-                        new_pan: *pan,
-                        old_mute: *mute,
-                        new_mute: m,
-                    },
-                );
-                app.sync_engine();
+        cott_core::graph::NodeKind::GainPan { .. }
+        | cott_core::graph::NodeKind::SumMixer { .. }
+        | cott_core::graph::NodeKind::StereoSplitter { .. } => {
+            ui.label("Built-in node — use the floating editor (double-click in Routing).");
+            if ui.button("Open editor").clicked() {
+                node_editors::open_editor(app, node_id);
             }
             return;
         }
@@ -701,7 +672,7 @@ fn draw_plugin_inspector(app: &mut CottApp, ui: &mut egui::Ui) {
     }
 }
 
-fn draw_builtin_synth_inspector(
+pub(crate) fn draw_builtin_synth_inspector(
     app: &mut CottApp,
     ui: &mut egui::Ui,
     node_id: NodeId,

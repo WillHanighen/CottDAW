@@ -249,8 +249,9 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
                                             );
                                         }
                                     }
-                                    if ui.small_button("Select FX").clicked() {
+                                    if ui.small_button("Gain").clicked() {
                                         app.ui.selected_node = Some(gain_id);
+                                        crate::ui::node_editors::open_editor(app, gain_id);
                                     }
                                 }
                                 ui.horizontal(|ui| {

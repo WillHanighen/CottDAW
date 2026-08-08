@@ -1,0 +1,15 @@
+[package]
+name = "cott-filter"
+version.workspace = true
+edition = "2021"
+license.workspace = true
+authors.workspace = true
+description = "CottFilter — redistributable stereo LP/HP VST3 over cott-filter-dsp"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+cott-filter-dsp = { workspace = true }
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", default-features = false, features = ["vst3"] }
+nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug.git" }

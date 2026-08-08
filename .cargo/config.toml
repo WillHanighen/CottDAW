@@ -3,3 +3,6 @@
 bundle-synth = "run -p cott-xtask --release -- bundle cott-synth --release"
 # Debug bundle (faster iteration while developing the plugin).
 bundle-synth-debug = "run -p cott-xtask -- bundle cott-synth"
+# CottFilter (stereo LP/HP effect).
+bundle-filter = "run -p cott-xtask --release -- bundle cott-filter --release"
+bundle-filter-debug = "run -p cott-xtask -- bundle cott-filter"

@@ -54,6 +54,7 @@ impl PluginHost {
             .unwrap_or_else(|| PathBuf::from("cott-vst-worker"));
         let mut catalog = Vec::new();
         crate::builtin_synth::inject_cott_synth(&mut catalog);
+        crate::builtin_filter::inject_cott_filter(&mut catalog);
         Self {
             catalog,
             instances: IndexMap::new(),
@@ -62,9 +63,10 @@ impl PluginHost {
         }
     }
 
-    /// Merge a scan result while keeping CottSynth baked into the browser.
+    /// Merge a scan result while keeping first-party VSTs baked into the browser.
     pub fn set_catalog_from_scan(&mut self, mut catalog: Vec<PluginDescriptor>) {
         crate::builtin_synth::inject_cott_synth(&mut catalog);
+        crate::builtin_filter::inject_cott_filter(&mut catalog);
         self.catalog = catalog;
     }
 
@@ -82,7 +84,8 @@ impl PluginHost {
 
     #[allow(dead_code)]
     pub fn scan(&mut self) -> Result<()> {
-        self.catalog = Self::scan_catalog(&self.worker_bin, &self.scan_blacklist)?;
+        let catalog = Self::scan_catalog(&self.worker_bin, &self.scan_blacklist)?;
+        self.set_catalog_from_scan(catalog);
         Ok(())
     }
 

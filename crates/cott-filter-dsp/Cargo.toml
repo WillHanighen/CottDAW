@@ -1,0 +1,9 @@
+[package]
+name = "cott-filter-dsp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Stereo low-pass / high-pass biquad DSP shared by CottFilter VST3"
+
+[dependencies]
+serde = { workspace = true }

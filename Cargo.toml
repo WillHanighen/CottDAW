@@ -7,6 +7,8 @@ members = [
     "crates/cott-vst-worker",
     "crates/cott-synth-dsp",
     "crates/cott-synth",
+    "crates/cott-filter-dsp",
+    "crates/cott-filter",
     "crates/cott-xtask",
 ]
 default-members = ["crates/cott-daw"]
@@ -21,6 +23,7 @@ authors = ["Cottage End"]
 cott-core = { path = "crates/cott-core" }
 cott-ipc = { path = "crates/cott-ipc" }
 cott-synth-dsp = { path = "crates/cott-synth-dsp" }
+cott-filter-dsp = { path = "crates/cott-filter-dsp" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

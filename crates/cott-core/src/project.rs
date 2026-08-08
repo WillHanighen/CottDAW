@@ -484,6 +484,7 @@ impl Project {
         if project.meta.version < PROJECT_VERSION {
             project.meta.version = PROJECT_VERSION;
         }
+        project.graph.migrate_nodes();
         project.root_dir = Some(dir.to_path_buf());
         for asset in project.assets.values_mut() {
             crate::archive::validate_archive_path(&asset.relative_path)?;

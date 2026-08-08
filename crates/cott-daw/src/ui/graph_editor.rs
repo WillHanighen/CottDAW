@@ -19,6 +19,9 @@ const BUTTON_ZOOM_STEP_PCT: i32 = 5;
 enum AddNodeAction {
     Gain,
     Mixer,
+    Splitter,
+    MidiMixer,
+    MidiSplitter,
     Instrument(PluginDescriptor),
     Effect(PluginDescriptor),
 }
@@ -35,7 +38,7 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
 
     ui.horizontal(|ui| {
         ui.label(
-            "Drag nodes · empty drag pans · scroll zooms · double-click plugin for editor · right-click add/delete",
+            "Drag nodes · empty drag pans · scroll zooms · double-click for editor · right-click add/delete",
         );
         if ui.button("Add Gain").clicked() {
             let mut node = cott_core::graph::GraphNode::stereo_gain_pan("Gain");
@@ -46,11 +49,47 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
                 cott_core::commands::Command::AddNode { node },
             );
             app.ui.selected_node = Some(id);
+            crate::ui::node_editors::open_editor(app, id);
             app.sync_engine();
         }
         if ui.button("Add Mixer").clicked() {
             let mut node = cott_core::graph::GraphNode::sum_mixer("Bus");
             node.position = [300.0, 200.0];
+            let id = node.id;
+            app.commands.push(
+                &mut app.project,
+                cott_core::commands::Command::AddNode { node },
+            );
+            app.ui.selected_node = Some(id);
+            crate::ui::node_editors::open_editor(app, id);
+            app.sync_engine();
+        }
+        if ui.button("Add Splitter").clicked() {
+            let mut node = cott_core::graph::GraphNode::stereo_splitter("Split");
+            node.position = [300.0, 280.0];
+            let id = node.id;
+            app.commands.push(
+                &mut app.project,
+                cott_core::commands::Command::AddNode { node },
+            );
+            app.ui.selected_node = Some(id);
+            crate::ui::node_editors::open_editor(app, id);
+            app.sync_engine();
+        }
+        if ui.button("Add MIDI Mixer").clicked() {
+            let mut node = cott_core::graph::GraphNode::midi_mixer("MIDI Mix");
+            node.position = [220.0, 200.0];
+            let id = node.id;
+            app.commands.push(
+                &mut app.project,
+                cott_core::commands::Command::AddNode { node },
+            );
+            app.ui.selected_node = Some(id);
+            app.sync_engine();
+        }
+        if ui.button("Add MIDI Splitter").clicked() {
+            let mut node = cott_core::graph::GraphNode::midi_splitter("MIDI Split");
+            node.position = [220.0, 280.0];
             let id = node.id;
             app.commands.push(
                 &mut app.project,
@@ -162,10 +201,13 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, egui::Color32::from_rgb(24, 26, 30));
 
-    let node_w = 140.0;
     let node_h_base = 56.0;
     let mut port_positions: IndexMap<(NodeId, PortId), egui::Pos2> = IndexMap::new();
     let mut node_rects: IndexMap<NodeId, egui::Rect> = IndexMap::new();
+    let mut node_widths: IndexMap<NodeId, f32> = IndexMap::new();
+    for (id, node) in &app.project.graph.nodes {
+        node_widths.insert(*id, node_body_width(node));
+    }
 
     // Draw edges.
     let mut edge_hit: Option<EdgeId> = None;
@@ -176,6 +218,7 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
         let Some(to_node) = app.project.graph.nodes.get(&edge.to_node) else {
             continue;
         };
+        let from_w = node_widths.get(&edge.from_node).copied().unwrap_or(140.0);
         let from_idx = from_node
             .outputs
             .iter()
@@ -187,7 +230,7 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
             .position(|p| p.id == edge.to_port)
             .unwrap_or(0);
         let a = world_to_screen(
-            from_node.position[0] + node_w,
+            from_node.position[0] + from_w,
             from_node.position[1] + 28.0 + from_idx as f32 * 14.0,
         );
         let b = world_to_screen(
@@ -216,6 +259,7 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
                 app.project.graph.nodes.get(&edge.from_node),
                 app.project.graph.nodes.get(&edge.to_node),
             ) {
+                let from_w = node_widths.get(&edge.from_node).copied().unwrap_or(140.0);
                 let from_idx = from_node
                     .outputs
                     .iter()
@@ -227,7 +271,7 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
                     .position(|p| p.id == edge.to_port)
                     .unwrap_or(0);
                 let a = world_to_screen(
-                    from_node.position[0] + node_w,
+                    from_node.position[0] + from_w,
                     from_node.position[1] + 28.0 + from_idx as f32 * 14.0,
                 );
                 let b = world_to_screen(
@@ -245,6 +289,7 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
         let Some(node) = app.project.graph.nodes.get(&node_id).cloned() else {
             continue;
         };
+        let node_w = node_widths.get(&node_id).copied().unwrap_or(140.0);
         let ports = node.inputs.len().max(node.outputs.len()).max(1);
         let h = node_h_base + (ports as f32 - 1.0) * 14.0;
         let origin = world_to_screen(node.position[0], node.position[1]);
@@ -275,6 +320,8 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
         );
 
         let port_r = (5.0 * zoom).clamp(3.0, 12.0);
+        let label_font = egui::FontId::proportional((10.0 * zoom).clamp(7.0, 16.0));
+        let show_port_labels = node.inputs.len() > 2 || node.outputs.len() > 2;
         for (i, port) in node.inputs.iter().enumerate() {
             let p = world_to_screen(node.position[0], node.position[1] + 28.0 + i as f32 * 14.0);
             port_positions.insert((node_id, port.id), p);
@@ -283,6 +330,15 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
                 PortType::Audio => egui::Color32::from_rgb(80, 180, 220),
             };
             painter.circle_filled(p, port_r, color);
+            if show_port_labels {
+                painter.text(
+                    p + egui::vec2(8.0 * zoom, 0.0),
+                    egui::Align2::LEFT_CENTER,
+                    &port.name,
+                    label_font.clone(),
+                    egui::Color32::from_rgb(180, 190, 200),
+                );
+            }
         }
         for (i, port) in node.outputs.iter().enumerate() {
             let p = world_to_screen(
@@ -295,6 +351,15 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
                 PortType::Audio => egui::Color32::from_rgb(80, 180, 220),
             };
             painter.circle_filled(p, port_r, color);
+            if show_port_labels {
+                painter.text(
+                    p - egui::vec2(8.0 * zoom, 0.0),
+                    egui::Align2::RIGHT_CENTER,
+                    &port.name,
+                    label_font.clone(),
+                    egui::Color32::from_rgb(180, 190, 200),
+                );
+            }
         }
     }
 
@@ -372,26 +437,44 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
                 if let Some((to_node, to_port)) =
                     hit_input_port(&port_positions, &app.project.graph, pos)
                 {
-                    let replaced: Vec<_> = app
+                    let fan_in = app
                         .project
                         .graph
-                        .edges
-                        .values()
-                        .filter(|e| e.to_node == to_node && e.to_port == to_port)
-                        .cloned()
-                        .collect();
-                    match app
-                        .project
-                        .graph
-                        .connect_replace(from_node, from_port, to_node, to_port)
-                    {
-                        Ok(edge_id) => {
+                        .nodes
+                        .get(&to_node)
+                        .is_some_and(|n| n.kind.allows_input_fan_in());
+                    let result = if fan_in {
+                        app.project
+                            .graph
+                            .connect(from_node, from_port, to_node, to_port)
+                            .map(|edge_id| (edge_id, Vec::new()))
+                    } else {
+                        let replaced: Vec<_> = app
+                            .project
+                            .graph
+                            .edges
+                            .values()
+                            .filter(|e| e.to_node == to_node && e.to_port == to_port)
+                            .cloned()
+                            .collect();
+                        app.project
+                            .graph
+                            .connect_replace(from_node, from_port, to_node, to_port)
+                            .map(|edge_id| (edge_id, replaced))
+                    };
+                    match result {
+                        Ok((edge_id, replaced)) => {
                             let edge = app.project.graph.edges[&edge_id].clone();
-                            app.commands
-                                .record(cott_core::commands::Command::ConnectReplace {
-                                    edge,
-                                    replaced,
-                                });
+                            if replaced.is_empty() {
+                                app.commands
+                                    .record(cott_core::commands::Command::Connect { edge });
+                            } else {
+                                app.commands
+                                    .record(cott_core::commands::Command::ConnectReplace {
+                                        edge,
+                                        replaced,
+                                    });
+                            }
                             app.status = "Connected".into();
                             app.sync_engine();
                         }
@@ -407,13 +490,13 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
         app.ui.graph_panning = false;
     }
 
-    // Double-click a plugin node to open its native editor.
+    // Double-click a node to open its editor (built-in floating UI or plugin native).
     if resp.double_clicked() {
         if let Some(pos) = pointer {
             for (node_id, nrect) in node_rects.iter().rev() {
                 if nrect.contains(pos) {
                     app.ui.selected_node = Some(*node_id);
-                    app.open_plugin_editor_for_node(*node_id);
+                    crate::ui::node_editors::open_editor(app, *node_id);
                     break;
                 }
             }
@@ -472,8 +555,13 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
             ui.separator();
         }
         if let Some(node_id) = menu_node {
-            if node_has_plugin_editor(&app.project.graph, node_id) {
-                if ui.button("Open plugin editor").clicked() {
+            if node_has_editor(&app.project.graph, node_id) {
+                let label = if node_has_plugin_editor(&app.project.graph, node_id) {
+                    "Open plugin editor"
+                } else {
+                    "Open editor"
+                };
+                if ui.button(label).clicked() {
                     action = Some(ContextAction::OpenEditor(node_id));
                     ui.close_menu();
                 }
@@ -503,8 +591,20 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
             action = Some(ContextAction::Add(AddNodeAction::Gain));
             ui.close_menu();
         }
-        if ui.button("Mixer").clicked() {
+        if ui.button("Mixer (audio)").clicked() {
             action = Some(ContextAction::Add(AddNodeAction::Mixer));
+            ui.close_menu();
+        }
+        if ui.button("Splitter (audio)").clicked() {
+            action = Some(ContextAction::Add(AddNodeAction::Splitter));
+            ui.close_menu();
+        }
+        if ui.button("MIDI Mixer").clicked() {
+            action = Some(ContextAction::Add(AddNodeAction::MidiMixer));
+            ui.close_menu();
+        }
+        if ui.button("MIDI Splitter").clicked() {
+            action = Some(ContextAction::Add(AddNodeAction::MidiSplitter));
             ui.close_menu();
         }
         ui.separator();
@@ -554,10 +654,46 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
                 cott_core::commands::Command::AddNode { node },
             );
             app.ui.selected_node = Some(id);
+            crate::ui::node_editors::open_editor(app, id);
             app.sync_engine();
         }
         Some(ContextAction::Add(AddNodeAction::Mixer)) => {
             let mut node = cott_core::graph::GraphNode::sum_mixer("Bus");
+            node.position = graph_position;
+            let id = node.id;
+            app.commands.push(
+                &mut app.project,
+                cott_core::commands::Command::AddNode { node },
+            );
+            app.ui.selected_node = Some(id);
+            crate::ui::node_editors::open_editor(app, id);
+            app.sync_engine();
+        }
+        Some(ContextAction::Add(AddNodeAction::Splitter)) => {
+            let mut node = cott_core::graph::GraphNode::stereo_splitter("Split");
+            node.position = graph_position;
+            let id = node.id;
+            app.commands.push(
+                &mut app.project,
+                cott_core::commands::Command::AddNode { node },
+            );
+            app.ui.selected_node = Some(id);
+            crate::ui::node_editors::open_editor(app, id);
+            app.sync_engine();
+        }
+        Some(ContextAction::Add(AddNodeAction::MidiMixer)) => {
+            let mut node = cott_core::graph::GraphNode::midi_mixer("MIDI Mix");
+            node.position = graph_position;
+            let id = node.id;
+            app.commands.push(
+                &mut app.project,
+                cott_core::commands::Command::AddNode { node },
+            );
+            app.ui.selected_node = Some(id);
+            app.sync_engine();
+        }
+        Some(ContextAction::Add(AddNodeAction::MidiSplitter)) => {
+            let mut node = cott_core::graph::GraphNode::midi_splitter("MIDI Split");
             node.position = graph_position;
             let id = node.id;
             app.commands.push(
@@ -597,7 +733,7 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
             }
         }
         Some(ContextAction::OpenEditor(node_id)) => {
-            app.open_plugin_editor_for_node(node_id);
+            crate::ui::node_editors::open_editor(app, node_id);
         }
         None => {}
     }
@@ -660,6 +796,15 @@ fn set_zoom_percent_at(app: &mut CottApp, screen_pos: egui::Pos2, percent: i32) 
     app.ui.graph_zoom = new_zoom;
 }
 
+fn node_body_width(node: &cott_core::graph::GraphNode) -> f32 {
+    let labeled = node.inputs.len() > 2 || node.outputs.len() > 2;
+    if labeled {
+        168.0
+    } else {
+        140.0
+    }
+}
+
 fn node_has_plugin_editor(graph: &cott_core::graph::AudioGraph, node_id: NodeId) -> bool {
     matches!(
         graph.nodes.get(&node_id).map(|n| &n.kind),
@@ -668,6 +813,13 @@ fn node_has_plugin_editor(graph: &cott_core::graph::AudioGraph, node_id: NodeId)
                 | cott_core::graph::NodeKind::PluginEffect { failed, .. }
         ) if !*failed
     )
+}
+
+fn node_has_editor(graph: &cott_core::graph::AudioGraph, node_id: NodeId) -> bool {
+    graph
+        .nodes
+        .get(&node_id)
+        .is_some_and(|n| n.kind.has_builtin_editor() || node_has_plugin_editor(graph, node_id))
 }
 
 fn hit_input_port(

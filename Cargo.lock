@@ -944,6 +944,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "cott-filter"
+version = "0.1.0"
+dependencies = [
+ "cott-filter-dsp",
+ "nih_plug",
+ "nih_plug_egui",
+]
+
+[[package]]
+name = "cott-filter-dsp"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "cott-ipc"
 version = "0.1.0"
 dependencies = [

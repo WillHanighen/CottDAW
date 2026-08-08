@@ -1192,7 +1192,10 @@ impl CottApp {
                 .tracks
                 .iter()
                 .any(|track| track.gain_node == Some(node_id)),
-            NodeKind::SumMixer
+            NodeKind::SumMixer { .. }
+            | NodeKind::StereoSplitter { .. }
+            | NodeKind::MidiMixer
+            | NodeKind::MidiSplitter
             | NodeKind::BuiltinSynth { .. }
             | NodeKind::PluginInstrument { .. }
             | NodeKind::PluginEffect { .. } => true,
@@ -1243,6 +1246,7 @@ impl CottApp {
         if self.ui.selected_node == Some(node_id) {
             self.ui.selected_node = None;
         }
+        self.ui.open_node_editors.shift_remove(&node_id);
         self.sync_engine();
         self.status = format!("Deleted {name}");
     }

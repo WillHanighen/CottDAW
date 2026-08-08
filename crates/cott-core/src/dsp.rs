@@ -2,11 +2,12 @@
 
 use crate::automation::gain_db_to_linear;
 use crate::clips::ScheduledMidiEvent;
-use crate::graph::{CompiledPlan, NodeKind, PortType};
+use crate::graph::{CompiledPlan, MIXER_STRIP_COUNT, NodeKind, PortType};
 use crate::ids::{NodeId, PortId, TrackId};
 use crate::time::{SamplePos, TempoMap, TransportState};
 use cott_synth_dsp::{MidiNoteEvent, PolySynth};
 use indexmap::IndexMap;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
@@ -284,8 +285,16 @@ pub fn process_block(
             continue;
         };
 
-        // Sum audio inputs into a stereo buffer.
-        let mut input = AudioBuffer::silent(2, frames);
+        // Sum audio inputs; channel count follows the node's highest input channel.
+        let in_channels = node
+            .inputs
+            .iter()
+            .filter(|p| p.port_type == PortType::Audio)
+            .map(|p| p.channel as usize + 1)
+            .max()
+            .unwrap_or(2)
+            .max(2);
+        let mut input = AudioBuffer::silent(in_channels, frames);
         for edge in plan.edges.iter().filter(|e| e.to_node == *node_id) {
             if let Some(buf) = port_buffers.get(&(edge.from_node, edge.from_port)) {
                 if let Some(to_port) = node.find_port(edge.to_port) {
@@ -316,6 +325,9 @@ pub fn process_block(
             NodeKind::MidiClipSource { track_id } => {
                 // MIDI-only source; events consumed by downstream instrument.
                 let _ = track_id;
+            }
+            NodeKind::MidiMixer | NodeKind::MidiSplitter => {
+                // MIDI routers — audio silent; events collected via graph walk.
             }
             NodeKind::GainPan {
                 gain_db,
@@ -351,12 +363,74 @@ pub fn process_block(
                     output.apply_pan_stereo(p);
                 }
             }
-            NodeKind::SumMixer => {
-                output = input;
+            NodeKind::SumMixer {
+                strips,
+                master_gain_db,
+                master_pan,
+                mute,
+            } => {
+                if *mute {
+                    output.clear();
+                } else {
+                    let mut mixed = AudioBuffer::silent(2, frames);
+                    for (i, strip) in strips.iter().take(MIXER_STRIP_COUNT).enumerate() {
+                        if strip.mute {
+                            continue;
+                        }
+                        let mut strip_buf = AudioBuffer::silent(2, frames);
+                        let l = i * 2;
+                        let r = i * 2 + 1;
+                        if l < input.channel_count() {
+                            let len = frames.min(input.channels[l].len());
+                            strip_buf.channels[0][..len]
+                                .copy_from_slice(&input.channels[l][..len]);
+                        }
+                        if r < input.channel_count() {
+                            let len = frames.min(input.channels[r].len());
+                            strip_buf.channels[1][..len]
+                                .copy_from_slice(&input.channels[r][..len]);
+                        }
+                        strip_buf.apply_gain(gain_db_to_linear(strip.gain_db));
+                        strip_buf.apply_pan_stereo(strip.pan);
+                        mixed.add_from(&strip_buf);
+                    }
+                    mixed.apply_gain(gain_db_to_linear(*master_gain_db));
+                    mixed.apply_pan_stereo(*master_pan);
+                    output = mixed;
+                }
+            }
+            NodeKind::StereoSplitter { a, b } => {
+                let mut branch_a = AudioBuffer::silent(2, frames);
+                let mut branch_b = AudioBuffer::silent(2, frames);
+                for ch in 0..2 {
+                    if ch < input.channel_count() {
+                        let len = frames.min(input.channels[ch].len());
+                        branch_a.channels[ch][..len].copy_from_slice(&input.channels[ch][..len]);
+                        branch_b.channels[ch][..len].copy_from_slice(&input.channels[ch][..len]);
+                    }
+                }
+                branch_a.apply_gain(gain_db_to_linear(a.gain_db));
+                branch_a.apply_pan_stereo(a.pan);
+                branch_b.apply_gain(gain_db_to_linear(b.gain_db));
+                branch_b.apply_pan_stereo(b.pan);
+                output = AudioBuffer::silent(4, frames);
+                let len = frames;
+                output.channels[0][..len].copy_from_slice(&branch_a.channels[0][..len]);
+                output.channels[1][..len].copy_from_slice(&branch_a.channels[1][..len]);
+                output.channels[2][..len].copy_from_slice(&branch_b.channels[0][..len]);
+                output.channels[3][..len].copy_from_slice(&branch_b.channels[1][..len]);
             }
             NodeKind::MasterOutput => {
-                master.add_from(&input);
-                output = input;
+                // Master is always stereo — take the first two channels.
+                let mut stereo = AudioBuffer::silent(2, frames);
+                for ch in 0..2 {
+                    if ch < input.channel_count() {
+                        let len = frames.min(input.channels[ch].len());
+                        stereo.channels[ch][..len].copy_from_slice(&input.channels[ch][..len]);
+                    }
+                }
+                master.add_from(&stereo);
+                output = stereo;
             }
             NodeKind::BuiltinSynth { params } => {
                 let midi = collect_midi_for_instrument(plan, *node_id, ctx);
@@ -550,22 +624,20 @@ fn collect_midi_for_instrument(
     instrument_node: NodeId,
     ctx: &ProcessContext<'_>,
 ) -> Vec<ScheduledMidiEvent> {
+    let mut source_tracks = HashSet::new();
+    let mut visited = HashSet::new();
+    collect_midi_source_tracks(plan, instrument_node, &mut visited, &mut source_tracks);
+
     let mut events = Vec::new();
-    let mut source_tracks = Vec::new();
-    for edge in plan.edges.iter().filter(|e| e.to_node == instrument_node) {
-        if let Some(src) = plan.nodes.get(&edge.from_node) {
-            if let NodeKind::MidiClipSource { track_id } = &src.kind {
-                source_tracks.push(*track_id);
-                if matches!(ctx.transport, TransportState::Playing) {
-                    events.extend(crate::clips::schedule_midi_for_block(
-                        ctx.clips,
-                        *track_id,
-                        ctx.tempo,
-                        ctx.block_start,
-                        ctx.block_len,
-                    ));
-                }
-            }
+    if matches!(ctx.transport, TransportState::Playing) {
+        for track_id in &source_tracks {
+            events.extend(crate::clips::schedule_midi_for_block(
+                ctx.clips,
+                *track_id,
+                ctx.tempo,
+                ctx.block_start,
+                ctx.block_len,
+            ));
         }
     }
     for (track_id, ev) in ctx.preview_midi {
@@ -579,6 +651,38 @@ fn collect_midi_for_instrument(
             .then_with(|| a.sort_priority().cmp(&b.sort_priority()))
     });
     events
+}
+
+/// Walk upstream over MIDI edges through mixers/splitters to find clip sources.
+fn collect_midi_source_tracks(
+    plan: &CompiledPlan,
+    node_id: NodeId,
+    visited: &mut HashSet<NodeId>,
+    tracks: &mut HashSet<TrackId>,
+) {
+    if !visited.insert(node_id) {
+        return;
+    }
+    for edge in plan.edges.iter().filter(|e| e.to_node == node_id) {
+        let Some(from_node) = plan.nodes.get(&edge.from_node) else {
+            continue;
+        };
+        let Some(from_port) = from_node.find_port(edge.from_port) else {
+            continue;
+        };
+        if from_port.port_type != PortType::Midi {
+            continue;
+        }
+        match &from_node.kind {
+            NodeKind::MidiClipSource { track_id } => {
+                tracks.insert(*track_id);
+            }
+            NodeKind::MidiMixer | NodeKind::MidiSplitter => {
+                collect_midi_source_tracks(plan, edge.from_node, visited, tracks);
+            }
+            _ => {}
+        }
+    }
 }
 
 #[cfg(test)]
@@ -808,17 +912,94 @@ mod tests {
     }
 
     #[test]
-    fn fan_in_sums() {
+    fn mixer_accepts_multiple_stereo_inputs() {
         let mut g = AudioGraph::new();
         let a = g.add_node(GraphNode::audio_clip_source(TrackId::new(), "A"));
         let b = g.add_node(GraphNode::audio_clip_source(TrackId::new(), "B"));
         let mix = g.add_node(GraphNode::sum_mixer("Mix"));
         let master = g.add_node(GraphNode::master_output());
-        g.connect_stereo(a, mix).unwrap();
-        g.connect_stereo(b, mix).unwrap();
+        // Strip 1 (In1 L/R) and strip 2 (In2 L/R).
+        let mix_in1_l = g.nodes[&mix].inputs[0].id;
+        let mix_in1_r = g.nodes[&mix].inputs[1].id;
+        let mix_in2_l = g.nodes[&mix].inputs[2].id;
+        let mix_in2_r = g.nodes[&mix].inputs[3].id;
+        let a_l = g.nodes[&a].outputs[0].id;
+        let a_r = g.nodes[&a].outputs[1].id;
+        let b_l = g.nodes[&b].outputs[0].id;
+        let b_r = g.nodes[&b].outputs[1].id;
+        g.connect(a, a_l, mix, mix_in1_l).unwrap();
+        g.connect(a, a_r, mix, mix_in1_r).unwrap();
+        g.connect(b, b_l, mix, mix_in2_l).unwrap();
+        g.connect(b, b_r, mix, mix_in2_r).unwrap();
         g.connect_stereo(mix, master).unwrap();
         let plan = CompiledPlan::compile(&g).unwrap();
         assert!(plan.order.len() >= 4);
+        assert_eq!(g.nodes[&mix].inputs.len(), MIXER_STRIP_COUNT * 2);
+    }
+
+    #[test]
+    fn midi_mixer_and_splitter_route_to_instrument() {
+        let mut g = AudioGraph::new();
+        let track_a = TrackId::new();
+        let track_b = TrackId::new();
+        let src_a = g.add_node(GraphNode::midi_clip_source(track_a, "A"));
+        let src_b = g.add_node(GraphNode::midi_clip_source(track_b, "B"));
+        let mix = g.add_node(GraphNode::midi_mixer("MIDI Mix"));
+        let split = g.add_node(GraphNode::midi_splitter("MIDI Split"));
+        let synth = g.add_node(GraphNode::builtin_synth("Synth"));
+        let master = g.add_node(GraphNode::master_output());
+
+        let mix_in1 = g.nodes[&mix].inputs[0].id;
+        let mix_in2 = g.nodes[&mix].inputs[1].id;
+        let mix_out = g.nodes[&mix].outputs[0].id;
+        let a_out = g.nodes[&src_a].outputs[0].id;
+        let b_out = g.nodes[&src_b].outputs[0].id;
+        g.connect(src_a, a_out, mix, mix_in1).unwrap();
+        g.connect(src_b, b_out, mix, mix_in2).unwrap();
+        let split_in = g.nodes[&split].inputs[0].id;
+        g.connect(mix, mix_out, split, split_in).unwrap();
+        let split_a = g.nodes[&split].outputs[0].id;
+        let synth_in = g.nodes[&synth].inputs[0].id;
+        g.connect(split, split_a, synth, synth_in).unwrap();
+        g.connect_stereo(synth, master).unwrap();
+
+        let plan = CompiledPlan::compile(&g).unwrap();
+        assert!(plan.order.contains(&mix));
+        assert!(plan.order.contains(&split));
+        assert!(plan.order.contains(&synth));
+
+        let mut visited = HashSet::new();
+        let mut tracks = HashSet::new();
+        collect_midi_source_tracks(&plan, synth, &mut visited, &mut tracks);
+        assert!(tracks.contains(&track_a));
+        assert!(tracks.contains(&track_b));
+    }
+
+    #[test]
+    fn splitter_has_two_stereo_branches() {
+        let mut g = AudioGraph::new();
+        let src = g.add_node(GraphNode::audio_clip_source(TrackId::new(), "Src"));
+        let split = g.add_node(GraphNode::stereo_splitter("Split"));
+        let g_a = g.add_node(GraphNode::stereo_gain_pan("A"));
+        let g_b = g.add_node(GraphNode::stereo_gain_pan("B"));
+        let master = g.add_node(GraphNode::master_output());
+        g.connect_stereo(src, split).unwrap();
+        let a_l = g.nodes[&split].outputs[0].id;
+        let a_r = g.nodes[&split].outputs[1].id;
+        let b_l = g.nodes[&split].outputs[2].id;
+        let b_r = g.nodes[&split].outputs[3].id;
+        let ga_l = g.nodes[&g_a].inputs[0].id;
+        let ga_r = g.nodes[&g_a].inputs[1].id;
+        let gb_l = g.nodes[&g_b].inputs[0].id;
+        let gb_r = g.nodes[&g_b].inputs[1].id;
+        g.connect(split, a_l, g_a, ga_l).unwrap();
+        g.connect(split, a_r, g_a, ga_r).unwrap();
+        g.connect(split, b_l, g_b, gb_l).unwrap();
+        g.connect(split, b_r, g_b, gb_r).unwrap();
+        g.connect_stereo(g_a, master).unwrap();
+        g.connect_stereo(g_b, master).unwrap();
+        let plan = CompiledPlan::compile(&g).unwrap();
+        assert!(plan.order.contains(&split));
     }
 
     #[test]

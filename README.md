@@ -9,7 +9,7 @@ Arrangement timeline, piano-roll MIDI editing, an authoritative acyclic audio/MI
 - Arrangement timeline with MIDI and audio tracks
 - Piano-roll MIDI editing with note audition
 - Authoritative acyclic audio/MIDI routing graph (cycles rejected)
-- Built-in **CottSynth** VST3 (always in the browser, default on MIDI tracks, native editor UI)
+- Built-in **CottSynth** + **CottFilter** VST3s (always in the browser; synth default on MIDI tracks)
 - Built-in gain/pan/mute, summing, and master bus
 - Sandboxed VST2, VST3, CLAP, and LV2 hosting (one worker process per plugin)
 - yabridge support for Windows VST2, VST3, and CLAP plugins
@@ -17,7 +17,7 @@ Arrangement timeline, piano-roll MIDI editing, an authoritative acyclic audio/MI
 - Undo / redo
 - Project `.ctgdaw` save/load with periodic autosave
 - Offline export to WAV, Ogg Opus, or Gonio MP4 (via `ffmpeg`)
-- Redistributable CottSynth VST3 (`cargo bundle-synth`)
+- Redistributable CottSynth / CottFilter VST3s (`cargo bundle-synth`, `cargo bundle-filter`)
 
 ## Documentation
 
@@ -49,19 +49,20 @@ For Windows plugins, install Wine Staging and yabridge, register the Windows plu
 
 ```bash
 ./scripts/build-daw.sh
-# or: cargo bundle-synth-debug && cargo build -p cott-daw -p cott-vst-worker
+# or: cargo bundle-synth-debug && cargo bundle-filter-debug && cargo build -p cott-daw -p cott-vst-worker
 ```
 
-Both binaries land in `target/debug/`. The DAW looks for `cott-vst-worker` next to itself (or under `target/debug|release/`). Bundle CottSynth first so it shows up as the built-in VST3.
+Both binaries land in `target/debug/`. The DAW looks for `cott-vst-worker` next to itself (or under `target/debug|release/`). Bundle the first-party VSTs so they show up in the browser.
 
-### CottSynth VST3 (redistribution)
+### Built-in VST3s (redistribution)
 
 ```bash
-cargo bundle-synth          # release bundle → target/bundled/cott-synth.vst3
-cargo bundle-synth-debug    # debug bundle
+cargo bundle-synth          # → target/bundled/cott-synth.vst3
+cargo bundle-filter         # → target/bundled/cott-filter.vst3
+# debug: bundle-synth-debug / bundle-filter-debug
 ```
 
-Copy `target/bundled/cott-synth.vst3` into `~/.vst3/` (or another host’s VST3 path) to use it outside CottDAW. The DAW injects that bundle into the plugin browser automatically and loads it as the default MIDI instrument (sandboxed worker + native editor).
+Copy those bundles into `~/.vst3/` (or another host’s VST3 path) to use them outside CottDAW. The DAW injects them into the plugin browser automatically (CottSynth = default MIDI instrument; CottFilter = stereo LP/HP effect).
 
 ## Run
 
@@ -93,6 +94,7 @@ cott-vst-worker  (one process per plugin instance)
 
 - **`cott-core`** — project model, typed DAG, DSP graph compiler, offline render (includes built-in CottSynth)
 - **`cott-synth-dsp` / `cott-synth`** — shared synth engine + redistributable VST3
+- **`cott-filter-dsp` / `cott-filter`** — stereo LP/HP biquad + redistributable VST3
 - **`cott-ipc`** — length-prefixed bincode protocol + shared-memory audio/MIDI ring
 - Plugin crashes kill only the worker; the DAW silences/bypasses that node and keeps transport running
 
