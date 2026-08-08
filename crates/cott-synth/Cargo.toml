@@ -1,0 +1,15 @@
+[package]
+name = "cott-synth"
+version.workspace = true
+edition = "2021"
+license.workspace = true
+authors.workspace = true
+description = "CottSynth — redistributable VST3 wrapper over cott-synth-dsp"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+cott-synth-dsp = { workspace = true }
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", default-features = false, features = ["vst3"] }
+nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug.git" }

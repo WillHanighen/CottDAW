@@ -2,6 +2,7 @@
 
 mod app;
 mod audio;
+mod builtin_synth;
 mod plugins;
 mod ui;
 

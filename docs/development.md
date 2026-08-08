@@ -13,10 +13,14 @@ ffmpeg -version   # for Opus / Gonio export tests by hand
 
 ```
 Cargo.toml                 # workspace + dependency versions + truce-rack-vst3 patch
+.cargo/config.toml         # aliases (`bundle-synth`, …)
 crates/cott-core/          # library (unit-tested)
 crates/cott-ipc/           # IPC protocol library
 crates/cott-daw/           # GUI binary `cott-daw`
 crates/cott-vst-worker/    # worker binary `cott-vst-worker`
+crates/cott-synth-dsp/     # CottSynth DSP (built-in + VST3)
+crates/cott-synth/         # CottSynth VST3 cdylib
+crates/cott-xtask/         # nih-plug bundler entry
 vendor/truce-rack-vst3/    # patched VST3 host bindings
 docs/                      # this documentation
 ```
@@ -26,11 +30,21 @@ Default member is `cott-daw`.
 ## Build
 
 ```bash
-# Debug (typical)
-cargo build -p cott-daw -p cott-vst-worker
+# Typical (script): bundle CottSynth, then host + worker
+./scripts/build-daw.sh
+./scripts/build-daw.sh release
 
-# Release
-cargo build --release -p cott-daw -p cott-vst-worker
+# Or manually:
+cargo bundle-synth-debug && cargo build -p cott-daw -p cott-vst-worker
+cargo bundle-synth && cargo build --release -p cott-daw -p cott-vst-worker
+```
+
+The DAW always lists CottSynth in the browser and loads `target/bundled/cott-synth.vst3` through the worker. Bundle before building `cott-daw` so `build.rs` can embed the absolute path.
+
+Install the same bundle for other hosts with:
+
+```bash
+cp -a target/bundled/cott-synth.vst3 ~/.vst3/
 ```
 
 The host resolves the worker binary as:
@@ -70,6 +84,8 @@ Useful `cott-core` areas covered by unit tests include tempo/sample conversion, 
 | Project `.ctgdaw` archives / tracks / default wiring | `cott-core/src/project.rs`, `archive.rs`, `clips.rs` |
 | Graph validation & compile / PDC | `cott-core/src/graph.rs` |
 | Block DSP | `cott-core/src/dsp.rs` |
+| CottSynth voices / waveforms / ADSR | `cott-synth-dsp` |
+| CottSynth VST3 wrapper | `cott-synth` |
 | Engine commands & offline render | `cott-core/src/engine.rs` |
 | Undoable edits | `cott-core/src/commands.rs` |
 | Export formats | `cott-core/src/export.rs`, `visualizers/` |

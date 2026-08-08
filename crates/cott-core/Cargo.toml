@@ -17,6 +17,7 @@ petgraph = { workspace = true }
 rtrb = { workspace = true }
 midly = { workspace = true }
 symphonia = { workspace = true }
+symphonia-adapter-libopus = { workspace = true }
 rubato = { workspace = true }
 parking_lot = { workspace = true }
 crossbeam-channel = { workspace = true }
@@ -26,6 +27,7 @@ indexmap = { workspace = true }
 bitflags = { workspace = true }
 tempfile = { workspace = true }
 cott-ipc = { workspace = true }
+cott-synth-dsp = { workspace = true }
 hound = { workspace = true }
 zip = { workspace = true }
 

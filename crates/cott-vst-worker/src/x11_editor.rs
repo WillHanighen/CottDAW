@@ -9,16 +9,21 @@ use std::ffi::CString;
 use std::mem::MaybeUninit;
 use std::os::raw::{c_uint, c_ulong};
 use std::ptr;
-use tracing::{debug, info};
+use std::thread;
+use std::time::{Duration, Instant};
+use tracing::{debug, info, warn};
 use x11_dl::xlib::{
     ButtonMotionMask, ButtonPressMask, ButtonReleaseMask, CWBackPixel, CWBorderPixel, CWColormap,
-    CWEventMask, CWOverrideRedirect, ClientMessage, Display, ExposureMask, False, InputOutput,
-    KeyPressMask, PointerMotionMask, StructureNotifyMask, SubstructureNotifyMask, True, Window,
-    XEvent, XSetWindowAttributes, Xlib,
+    CWEventMask, ClientMessage, ConfigureNotify, Display, ExposureMask, False, InputOutput,
+    KeyPressMask, PointerMotionMask, StructureNotifyMask, SubstructureNotifyMask, Window, XEvent,
+    XSetWindowAttributes, Xlib,
 };
 
-const DEFAULT_W: u32 = 800;
-const DEFAULT_H: u32 = 600;
+/// Match CottSynth's default egui size so we rarely need a post-attach resize.
+const DEFAULT_W: u32 = 440;
+const DEFAULT_H: u32 = 520;
+/// Match CottSynth / dark plugin UIs so WM resize doesn't flash white.
+const BG_PIXEL: u64 = 0x0016_181c; // #16181c
 
 pub struct FloatingEditorWindow {
     xlib: Xlib,
@@ -32,6 +37,14 @@ pub struct FloatingEditorWindow {
     height: u32,
     /// Set when the user closes the shell via the window manager.
     user_closed: bool,
+}
+
+/// Result of draining X events for the floating editor.
+#[derive(Debug, Clone, Copy)]
+pub struct EditorPumpResult {
+    pub closed: bool,
+    /// New shell size from `ConfigureNotify`, if any.
+    pub resized_to: Option<(u32, u32)>,
 }
 
 // Xlib Display is not Send across threads; we keep it on the worker UI thread.
@@ -54,13 +67,12 @@ impl FloatingEditorWindow {
             let screen = (xlib.XDefaultScreen)(display);
             let root = (xlib.XRootWindow)(display, screen);
             let black = (xlib.XBlackPixel)(display, screen);
-            let white = (xlib.XWhitePixel)(display, screen);
             let depth = (xlib.XDefaultDepth)(display, screen);
             let visual = (xlib.XDefaultVisual)(display, screen);
             let colormap = (xlib.XDefaultColormap)(display, screen);
 
             let mut attrs: XSetWindowAttributes = MaybeUninit::zeroed().assume_init();
-            attrs.background_pixel = white;
+            attrs.background_pixel = BG_PIXEL;
             attrs.border_pixel = black;
             attrs.colormap = colormap;
             attrs.event_mask = ExposureMask | StructureNotifyMask | SubstructureNotifyMask;
@@ -95,10 +107,8 @@ impl FloatingEditorWindow {
             let mut protocols = [wm_delete];
             (xlib.XSetWMProtocols)(display, shell, protocols.as_mut_ptr(), 1);
 
-            // Embed parent: child of shell, what VST3 attaches into.
-            // Include motion masks so drag gestures reach plugin child windows
-            // that rely on the embedder's event mask / XEmbed focus path.
-            attrs.override_redirect = True;
+            // Embed parent: normal child of shell (NOT override_redirect).
+            // override_redirect + GL child often paints black under NVIDIA/XWayland.
             attrs.event_mask = ExposureMask
                 | KeyPressMask
                 | ButtonPressMask
@@ -107,8 +117,7 @@ impl FloatingEditorWindow {
                 | ButtonMotionMask
                 | SubstructureNotifyMask
                 | StructureNotifyMask;
-            let embed_mask =
-                CWBackPixel | CWBorderPixel | CWColormap | CWEventMask | CWOverrideRedirect;
+            let embed_mask = CWBackPixel | CWBorderPixel | CWColormap | CWEventMask;
             let embed = (xlib.XCreateWindow)(
                 display,
                 shell,
@@ -131,7 +140,9 @@ impl FloatingEditorWindow {
 
             (xlib.XMapWindow)(display, embed);
             (xlib.XMapWindow)(display, shell);
-            (xlib.XFlush)(display);
+            // Ensure the server has created/mapped the windows before a VST3
+            // view attaches GL to `embed` — otherwise reopen can yield a black box.
+            (xlib.XSync)(display, False);
 
             info!(
                 title,
@@ -160,6 +171,75 @@ impl FloatingEditorWindow {
         self.embed as u64
     }
 
+    pub fn size(&self) -> (u32, u32) {
+        (self.width, self.height)
+    }
+
+    /// Flush + sync the X connection (use before destroy / after map).
+    pub fn sync(&self) {
+        unsafe {
+            (self.xlib.XSync)(self.display, False);
+        }
+    }
+
+    /// Number of direct children of the embed window (baseview's GL window).
+    pub fn embed_child_count(&self) -> u32 {
+        unsafe {
+            let mut root: Window = 0;
+            let mut parent: Window = 0;
+            let mut children: *mut Window = ptr::null_mut();
+            let mut nchildren: c_uint = 0;
+            if (self.xlib.XQueryTree)(
+                self.display,
+                self.embed,
+                &mut root,
+                &mut parent,
+                &mut children,
+                &mut nchildren,
+            ) == 0
+            {
+                return 0;
+            }
+            if !children.is_null() {
+                (self.xlib.XFree)(children as *mut _);
+            }
+            nchildren
+        }
+    }
+
+    /// After `IPlugView::removed`, baseview only sets a close atomic — its event
+    /// loop thread may still hold a GL context on a child of `embed`. Destroying
+    /// the parent while that thread is alive (and XID-recycling the next open)
+    /// produces a black editor. Wait until the child is gone.
+    pub fn wait_for_embed_children_gone(&mut self, timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let _ = self.pump_events();
+            self.sync();
+            let n = self.embed_child_count();
+            if n == 0 {
+                debug!("embed has no plugin children — safe to destroy parent");
+                return true;
+            }
+            if Instant::now() >= deadline {
+                warn!(
+                    children = n,
+                    "timed out waiting for plugin GL child to detach"
+                );
+                return false;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// Ensure the embed (and its GL child) is mapped and on top of the shell.
+    pub fn raise_embed(&self) {
+        unsafe {
+            (self.xlib.XMapRaised)(self.display, self.embed);
+            (self.xlib.XFlush)(self.display);
+        }
+    }
+
     pub fn resize(&mut self, width: u32, height: u32) {
         let width = width.max(80);
         let height = height.max(80);
@@ -176,11 +256,31 @@ impl FloatingEditorWindow {
         debug!(width, height, "resized floating editor window");
     }
 
-    /// Drain pending X events. Returns `false` if the user closed the window.
-    pub fn pump_events(&mut self) -> bool {
-        if self.user_closed {
-            return false;
+    /// Keep the embed child matched to the shell after a WM `ConfigureNotify`.
+    fn sync_embed_to_shell_size(&mut self, width: u32, height: u32) {
+        let width = width.max(80);
+        let height = height.max(80);
+        if width == self.width && height == self.height {
+            return;
         }
+        self.width = width;
+        self.height = height;
+        unsafe {
+            (self.xlib.XResizeWindow)(self.display, self.embed, width as c_uint, height as c_uint);
+            (self.xlib.XFlush)(self.display);
+        }
+        debug!(width, height, "synced embed to shell ConfigureNotify");
+    }
+
+    /// Drain pending X events.
+    pub fn pump_events(&mut self) -> EditorPumpResult {
+        if self.user_closed {
+            return EditorPumpResult {
+                closed: true,
+                resized_to: None,
+            };
+        }
+        let mut resized_to = None;
         unsafe {
             while (self.xlib.XPending)(self.display) > 0 {
                 let mut event = MaybeUninit::<XEvent>::uninit();
@@ -194,14 +294,31 @@ impl FloatingEditorWindow {
                         {
                             info!("editor window closed by user");
                             self.user_closed = true;
-                            return false;
+                            return EditorPumpResult {
+                                closed: true,
+                                resized_to: None,
+                            };
+                        }
+                    }
+                    t if t == ConfigureNotify => {
+                        let cfg = event.configure;
+                        if cfg.window == self.shell {
+                            let w = cfg.width.max(1) as u32;
+                            let h = cfg.height.max(1) as u32;
+                            if w != self.width || h != self.height {
+                                self.sync_embed_to_shell_size(w, h);
+                                resized_to = Some((w, h));
+                            }
                         }
                     }
                     _ => {}
                 }
             }
         }
-        true
+        EditorPumpResult {
+            closed: false,
+            resized_to,
+        }
     }
 }
 

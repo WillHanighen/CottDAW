@@ -482,8 +482,9 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
                 let delete_label = match app.project.graph.nodes.get(&node_id).map(|n| &n.kind) {
                     Some(
                         cott_core::graph::NodeKind::PluginEffect { .. }
-                        | cott_core::graph::NodeKind::PluginInstrument { .. },
-                    ) => "Delete plugin / FX",
+                        | cott_core::graph::NodeKind::PluginInstrument { .. }
+                        | cott_core::graph::NodeKind::BuiltinSynth { .. },
+                    ) => "Delete instrument / FX",
                     _ => "Delete node",
                 };
                 if ui.button(delete_label).clicked() {

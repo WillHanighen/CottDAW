@@ -52,12 +52,20 @@ impl PluginHost {
             .and_then(|p| p.parent().map(|d| d.join("cott-vst-worker")))
             .filter(|p| p.exists())
             .unwrap_or_else(|| PathBuf::from("cott-vst-worker"));
+        let mut catalog = Vec::new();
+        crate::builtin_synth::inject_cott_synth(&mut catalog);
         Self {
-            catalog: Vec::new(),
+            catalog,
             instances: IndexMap::new(),
             worker_bin,
             scan_blacklist: Vec::new(),
         }
+    }
+
+    /// Merge a scan result while keeping CottSynth baked into the browser.
+    pub fn set_catalog_from_scan(&mut self, mut catalog: Vec<PluginDescriptor>) {
+        crate::builtin_synth::inject_cott_synth(&mut catalog);
+        self.catalog = catalog;
     }
 
     pub fn set_worker_bin(&mut self, path: PathBuf) {

@@ -9,13 +9,25 @@ use crate::time::TempoMap;
 use anyhow::{Context, Result, anyhow};
 use midly::{MetaMessage, Smf, Timing, TrackEventKind};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use symphonia::core::audio::SampleBuffer;
-use symphonia::core::codecs::DecoderOptions;
+use symphonia::core::codecs::{CodecRegistry, DecoderOptions};
 use symphonia::core::formats::FormatOptions;
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
+use symphonia_adapter_libopus::OpusDecoder;
+
+/// Default Symphonia codecs plus Opus (via libopus); Symphonia 0.5 has no native Opus.
+fn codec_registry() -> &'static CodecRegistry {
+    static REGISTRY: OnceLock<CodecRegistry> = OnceLock::new();
+    REGISTRY.get_or_init(|| {
+        let mut registry = CodecRegistry::new();
+        symphonia::default::register_enabled_codecs(&mut registry);
+        registry.register_all::<OpusDecoder>();
+        registry
+    })
+}
 
 pub struct ImportedAudio {
     pub buffer: AudioBuffer,
@@ -44,7 +56,7 @@ pub fn import_audio_file(path: &Path, target_sr: u32) -> Result<ImportedAudio> {
         .default_track()
         .ok_or_else(|| anyhow!("no default audio track"))?;
     let track_id = track.id;
-    let mut decoder = symphonia::default::get_codecs()
+    let mut decoder = codec_registry()
         .make(&track.codec_params, &DecoderOptions::default())
         .context("create decoder")?;
     let src_sr = track
@@ -328,5 +340,40 @@ mod tests {
         let notes = import_midi_file(&path, tempo);
         let _ = std::fs::remove_file(&path);
         notes
+    }
+
+    #[test]
+    fn import_ogg_opus_via_ffmpeg() {
+        use std::process::Command;
+        if Command::new("ffmpeg").arg("-version").output().is_err() {
+            eprintln!("skip: ffmpeg not installed");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        for (name, fmt) in [("t.opus", "opus"), ("t.ogg", "ogg")] {
+            let path = dir.path().join(name);
+            let status = Command::new("ffmpeg")
+                .args([
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "sine=frequency=440:duration=0.25",
+                    "-c:a",
+                    "libopus",
+                    "-b:a",
+                    "64k",
+                    "-f",
+                    fmt,
+                ])
+                .arg(&path)
+                .status()
+                .expect("spawn ffmpeg");
+            assert!(status.success(), "ffmpeg encode {name}");
+            let decoded = import_audio_file(&path, 48_000).unwrap_or_else(|e| {
+                panic!("decode {name}: {e:#}");
+            });
+            assert!(decoded.buffer.frames() > 0, "{name} produced no samples");
+        }
     }
 }

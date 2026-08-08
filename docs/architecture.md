@@ -15,6 +15,9 @@ crates/
   cott-ipc/           Host ↔ worker protocol + POSIX shared-memory layout
   cott-daw/           egui app, cpal/PipeWire I/O, plugin host manager
   cott-vst-worker/    Sandboxed multi-format process (load, process, X11 editor)
+  cott-synth-dsp/     Shared CottSynth voices / oscillators / ADSR
+  cott-synth/         Redistributable VST3 wrapper (nih-plug)
+  cott-xtask/         `cargo bundle-synth` bundler
 vendor/
   truce-rack-vst3/    Patched VST3 bindings (ModuleEntry before GetPluginFactory)
 ```
@@ -25,6 +28,8 @@ vendor/
 | `cott-ipc` | `HostToWorker` / `WorkerToHost`, `ShmLayout`, encode/decode |
 | `cott-daw` | UI, transport UX, spawning workers, forwarding SHM audio into the engine |
 | `cott-vst-worker` | One plugin instance; scan mode or process mode |
+| `cott-synth-dsp` | Polyphonic CottSynth DSP shared by the built-in node and VST3 |
+| `cott-synth` | VST3 `cdylib` for redistribution outside CottDAW |
 
 Workspace root patches `truce-rack-vst3` so Linux/yabridge chainloaders call `ModuleEntry` before `GetPluginFactory`.
 
@@ -68,7 +73,9 @@ Holds tempo/transport, tracks, clips, `AudioGraph`, assets, automation lanes, an
 
 ### Graph (`graph.rs`)
 
-**Node kinds:** `MidiClipSource`, `AudioClipSource`, `GainPan`, `SumMixer`, `MasterOutput`, `PluginInstrument`, `PluginEffect`.
+**Node kinds:** `MidiClipSource`, `AudioClipSource`, `GainPan`, `SumMixer`, `MasterOutput`, `BuiltinSynth`, `PluginInstrument`, `PluginEffect`.
+
+MIDI tracks default to the baked-in **CottSynth VST3** (always injected into the plugin catalog; loaded via `cott-vst-worker` like any other instrument). The same DSP lives in `cott-synth-dsp`. An in-process `BuiltinSynth` node remains only as a fallback when the `.vst3` bundle is missing. Redistribute with `cargo bundle-synth`.
 
 **Rules:**
 
@@ -168,7 +175,7 @@ Worker death → instance `failed`; instrument silence / effect bypass; UI offer
 
 | Path | Stack |
 |------|--------|
-| Audio import | symphonia decode → rubato resample → `assets/` + `SampleCache` |
+| Audio import | symphonia (+ libopus for Opus) decode → rubato resample → `assets/` + `SampleCache` |
 | MIDI import | midly SMF → `MidiNote`s |
 | WAV export | offline render → hound 16-bit PCM |
 | Opus export | render → (resample 48 kHz) → temp WAV → ffmpeg libopus |

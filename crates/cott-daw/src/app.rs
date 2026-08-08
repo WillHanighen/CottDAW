@@ -99,6 +99,15 @@ impl CottApp {
             plugin_scan_rx: None,
             export_rx: None,
         };
+        if let Some(track_id) = app
+            .project
+            .tracks
+            .iter()
+            .find(|t| t.kind == TrackKind::Midi)
+            .map(|t| t.id)
+        {
+            app.attach_default_cott_synth(track_id, true);
+        }
         app.sync_engine();
         // Never block window creation on VST scan (yabridge/Wine can take minutes).
         app.start_plugin_scan();
@@ -137,10 +146,13 @@ impl CottApp {
         match rx.try_recv() {
             Ok(Ok(catalog)) => {
                 self.plugin_scan_rx = None;
-                let n = catalog.len();
-                self.plugin_host.lock().catalog = catalog;
-                self.status = format!("Found {n} plugins");
-                info!("plugin scan finished: {n}");
+                {
+                    let mut host = self.plugin_host.lock();
+                    host.set_catalog_from_scan(catalog);
+                    let n = host.catalog.len();
+                    self.status = format!("Found {n} plugins");
+                    info!("plugin scan finished: {n}");
+                }
             }
             Ok(Err(e)) => {
                 self.plugin_scan_rx = None;
@@ -498,7 +510,7 @@ impl CottApp {
 
     pub fn import_audio(&mut self) {
         let Some(path) = rfd::FileDialog::new()
-            .add_filter("Audio", &["wav", "flac", "ogg", "mp3", "aiff", "m4a"])
+            .add_filter("Audio", &["wav", "flac", "ogg", "opus", "mp3", "aiff", "m4a"])
             .pick_file()
         else {
             return;
@@ -594,7 +606,57 @@ impl CottApp {
         if let Some(cmd) = track_add_command(&self.project, id) {
             self.commands.record(cmd);
         }
+        self.attach_default_cott_synth(id, false);
         self.sync_engine();
+    }
+
+    /// Load baked-in CottSynth VST3 on a MIDI track (fallback: in-process node).
+    pub fn attach_default_cott_synth(&mut self, track_id: TrackId, open_editor: bool) {
+        use crate::builtin_synth::{
+            cott_synth_descriptor, resolve_cott_synth_vst3, COTT_SYNTH_NAME,
+        };
+
+        let Some(path) = resolve_cott_synth_vst3() else {
+            warn!("CottSynth.vst3 missing — attaching in-process fallback");
+            if let Some(node_id) = self.project.attach_builtin_synth(track_id) {
+                self.ui.selected_node = Some(node_id);
+                self.status =
+                    "CottSynth (built-in fallback) — run `cargo bundle-synth` for the VST UI"
+                        .into();
+            }
+            return;
+        };
+
+        let desc = cott_synth_descriptor(path);
+        self.ui.selected_track = Some(track_id);
+        self.load_instrument_on_selected_track(
+            desc.format,
+            desc.uid,
+            desc.path,
+            COTT_SYNTH_NAME.into(),
+            [200.0, 120.0],
+        );
+        let instrument_node = self
+            .project
+            .tracks
+            .iter()
+            .find(|t| t.id == track_id)
+            .and_then(|t| t.instrument_node);
+        let Some(node_id) = instrument_node else {
+            warn!("CottSynth VST3 load failed — attaching in-process fallback");
+            if let Some(node_id) = self.project.attach_builtin_synth(track_id) {
+                self.ui.selected_node = Some(node_id);
+                self.status =
+                    "CottSynth (built-in fallback) — VST3 load failed; try `cargo bundle-synth`"
+                        .into();
+            }
+            return;
+        };
+
+        // Prefer the real VST editor over the generic Plugins-tab sliders.
+        if open_editor {
+            self.open_plugin_editor_for_node(node_id);
+        }
     }
 
     pub fn add_audio_track(&mut self) {
@@ -723,17 +785,9 @@ impl CottApp {
     }
 
     /// Rename a track. Not tracked on the undo stack (low-stakes metadata edit).
+    /// Also updates routing source/gain node labels to match.
     pub fn rename_track(&mut self, track_id: TrackId, name: String) {
-        let name = name.trim();
-        if name.is_empty() {
-            return;
-        }
-        if let Some(track) = self.project.tracks.iter_mut().find(|t| t.id == track_id) {
-            if track.name != name {
-                track.name = name.to_string();
-                self.project.touch();
-            }
-        }
+        self.project.rename_track(track_id, name);
     }
 
     /// Rename a clip. Not tracked on the undo stack (low-stakes metadata edit).
@@ -845,6 +899,7 @@ impl CottApp {
         let mut max_end = 0.0_f64;
         for note in &clipboard.notes {
             let start = (note.start_beats + delta).max(0.0);
+            // Preserve pitch/velocity/length/channel; only retarget start + fresh id.
             let new_note = MidiNote {
                 id: cott_core::ids::NoteId::new(),
                 pitch: note.pitch,
@@ -1138,6 +1193,7 @@ impl CottApp {
                 .iter()
                 .any(|track| track.gain_node == Some(node_id)),
             NodeKind::SumMixer
+            | NodeKind::BuiltinSynth { .. }
             | NodeKind::PluginInstrument { .. }
             | NodeKind::PluginEffect { .. } => true,
         }
@@ -1309,7 +1365,7 @@ impl CottApp {
 
     pub fn add_note_at(&mut self, clip_id: ClipId, pitch: u8, start_beats: f64, length: f64) {
         self.ensure_clip_length(clip_id, start_beats + length);
-        let note = MidiNote::new(pitch, 100, start_beats, length);
+        let note = MidiNote::new(pitch, self.ui.draw_velocity, start_beats, length);
         self.commands
             .push(&mut self.project, Command::AddNote { clip_id, note });
         self.sync_engine();
@@ -1320,7 +1376,7 @@ impl CottApp {
             .find(|c| c.id == clip_id)
             .map(|c| c.track_id)
         {
-            self.preview_note(track_id, pitch);
+            self.preview_note_vel(track_id, pitch, self.ui.draw_velocity);
         }
     }
 
@@ -1331,10 +1387,11 @@ impl CottApp {
             return;
         };
         self.ensure_clip_length(clip_id, start_beats + length);
+        let velocity = self.ui.draw_velocity;
         let notes: Vec<MidiNote> = pitches
             .iter()
             .copied()
-            .map(|pitch| MidiNote::new(pitch, 100, start_beats, length))
+            .map(|pitch| MidiNote::new(pitch, velocity, start_beats, length))
             .collect();
         let ids: Vec<_> = notes.iter().map(|n| n.id).collect();
         self.commands
@@ -1349,7 +1406,7 @@ impl CottApp {
             .find(|clip| clip.id == clip_id)
             .map(|clip| clip.track_id)
         {
-            self.preview_note(track_id, preview_pitch);
+            self.preview_note_vel(track_id, preview_pitch, velocity);
         }
     }
 
@@ -1492,7 +1549,7 @@ impl CottApp {
             .find(|c| c.id == clip_id)
             .map(|c| c.track_id)
         {
-            self.preview_note(track_id, after.pitch);
+            self.preview_note_vel(track_id, after.pitch, after.velocity);
         }
     }
 
@@ -1547,13 +1604,18 @@ impl CottApp {
 
     /// Audition a MIDI pitch through the track's instrument (works while stopped).
     pub fn preview_note(&mut self, track_id: TrackId, pitch: u8) {
+        self.preview_note_vel(track_id, pitch, 100);
+    }
+
+    /// Audition with an explicit velocity (piano-roll velocity editing).
+    pub fn preview_note_vel(&mut self, track_id: TrackId, pitch: u8, velocity: u8) {
         let sample_rate = self.audio.as_ref().map(|a| a.sample_rate).unwrap_or(48_000);
         let duration_samples = ((sample_rate as f64) * 0.18).round() as u32;
         if let Some(audio) = &mut self.audio {
             let _ = audio.cmd_tx.push(EngineCommand::PreviewNote {
                 track_id,
                 pitch,
-                velocity: 100,
+                velocity: velocity.min(127).max(1),
                 duration_samples: duration_samples.max(1),
             });
         }

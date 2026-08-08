@@ -9,6 +9,7 @@ use crate::graph::{CompiledPlan, NodeKind};
 use crate::ids::{NodeId, TrackId};
 use crate::project::Project;
 use crate::time::{SamplePos, TempoMap, TransportState};
+use cott_synth_dsp::PolySynth;
 use indexmap::IndexMap;
 use rtrb::{Consumer, Producer, RingBuffer};
 use std::sync::Arc;
@@ -146,6 +147,8 @@ pub struct AudioProcessor {
     pending_panic_midi: Vec<(TrackId, ScheduledMidiEvent)>,
     /// Persistent PDC delay rings keyed by node.
     pdc_state: IndexMap<NodeId, Vec<Vec<f32>>>,
+    /// Persistent CottSynth voice engines keyed by node.
+    builtin_synth_state: IndexMap<NodeId, PolySynth>,
 }
 
 impl AudioProcessor {
@@ -168,6 +171,7 @@ impl AudioProcessor {
             pending_preview_midi: Vec::new(),
             pending_panic_midi: Vec::new(),
             pdc_state: IndexMap::new(),
+            builtin_synth_state: IndexMap::new(),
         }
     }
 
@@ -235,6 +239,9 @@ impl AudioProcessor {
                 EngineCommand::SetPlan(plan) => {
                     // Existing delay rings encode the old plan's latency.
                     self.pdc_state.clear();
+                    // Drop synth engines for nodes that no longer exist.
+                    self.builtin_synth_state
+                        .retain(|id, _| plan.nodes.contains_key(id));
                     self.plan = plan;
                 }
                 EngineCommand::SetTransport(state) => {
@@ -399,6 +406,7 @@ impl AudioProcessor {
                 plugin_audio: host_ref,
                 preview_midi: &preview_midi,
                 pdc_state: &mut self.pdc_state,
+                builtin_synth_state: &mut self.builtin_synth_state,
             };
             process_block(&self.plan, &mut ctx, &mut self.meters)
         } else {
@@ -447,6 +455,7 @@ pub fn render_offline(
     let plan = project.compiled_plan();
     let mut meters = IndexMap::new();
     let mut pdc_state = IndexMap::new();
+    let mut builtin_synth_state = IndexMap::new();
     let mut position = SamplePos(0);
     let mut out = AudioBuffer::silent(2, length_samples.max(0) as usize);
     while position.0 < length_samples {
@@ -464,6 +473,7 @@ pub fn render_offline(
             plugin_audio: plugin_host,
             preview_midi: &[],
             pdc_state: &mut pdc_state,
+            builtin_synth_state: &mut builtin_synth_state,
         };
         let block = process_block(&plan, &mut ctx, &mut meters);
         let start = position.0 as usize;
@@ -537,9 +547,8 @@ mod tests {
     fn offline_render_produces_audio_for_midi() {
         let mut project = Project::new("t");
         let track = project.add_midi_track("Synth");
-        // Attach stub instrument path via gain only — NullPluginHost tones on MIDI
-        // through instrument nodes. Add a fake instrument node.
-        let _ = project.attach_instrument(track, "stub".into(), "/dev/null".into(), "Stub".into());
+        // In-process CottSynth fallback (no worker) for offline tests.
+        project.attach_builtin_synth(track).expect("builtin synth");
         let mut clip = Clip::new_midi(track, "C", 0.0, 2.0);
         clip.notes_mut()
             .unwrap()

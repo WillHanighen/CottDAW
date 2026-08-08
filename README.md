@@ -9,6 +9,7 @@ Arrangement timeline, piano-roll MIDI editing, an authoritative acyclic audio/MI
 - Arrangement timeline with MIDI and audio tracks
 - Piano-roll MIDI editing with note audition
 - Authoritative acyclic audio/MIDI routing graph (cycles rejected)
+- Built-in **CottSynth** VST3 (always in the browser, default on MIDI tracks, native editor UI)
 - Built-in gain/pan/mute, summing, and master bus
 - Sandboxed VST2, VST3, CLAP, and LV2 hosting (one worker process per plugin)
 - yabridge support for Windows VST2, VST3, and CLAP plugins
@@ -16,6 +17,7 @@ Arrangement timeline, piano-roll MIDI editing, an authoritative acyclic audio/MI
 - Undo / redo
 - Project `.ctgdaw` save/load with periodic autosave
 - Offline export to WAV, Ogg Opus, or Gonio MP4 (via `ffmpeg`)
+- Redistributable CottSynth VST3 (`cargo bundle-synth`)
 
 ## Documentation
 
@@ -46,10 +48,20 @@ For Windows plugins, install Wine Staging and yabridge, register the Windows plu
 ## Build
 
 ```bash
-cargo build -p cott-daw -p cott-vst-worker
+./scripts/build-daw.sh
+# or: cargo bundle-synth-debug && cargo build -p cott-daw -p cott-vst-worker
 ```
 
-Both binaries land in `target/debug/`. The DAW looks for `cott-vst-worker` next to itself (or under `target/debug|release/`).
+Both binaries land in `target/debug/`. The DAW looks for `cott-vst-worker` next to itself (or under `target/debug|release/`). Bundle CottSynth first so it shows up as the built-in VST3.
+
+### CottSynth VST3 (redistribution)
+
+```bash
+cargo bundle-synth          # release bundle → target/bundled/cott-synth.vst3
+cargo bundle-synth-debug    # debug bundle
+```
+
+Copy `target/bundled/cott-synth.vst3` into `~/.vst3/` (or another host’s VST3 path) to use it outside CottDAW. The DAW injects that bundle into the plugin browser automatically and loads it as the default MIDI instrument (sandboxed worker + native editor).
 
 ## Run
 
@@ -63,10 +75,10 @@ Logging uses the `RUST_LOG` env filter (defaults include `cott_daw=info` and `co
 
 ## Quick workflow
 
-1. Select a MIDI track in the arrangement.
-2. Load a plugin from the left browser (click an entry), or right-click the routing canvas.
-3. Click **+ Clip**, select the clip, draw notes in the Piano Roll (left-click add, right-click remove).
-4. Press Play (Space). Adjust gain on the track header.
+1. Select a MIDI track (it already has **CottSynth**; its editor opens on startup).
+2. Click **+ Clip**, select the clip, draw notes in the Piano Roll (left-click add, right-click remove).
+3. Press Play (Space). Re-open the editor anytime from **Plugins** → **Open Native Editor**.
+4. CottSynth stays listed in the left browser; load anything else to replace it. Adjust gain on the track header.
 5. Open **Routing** to reconnect nodes; invalid cycles are rejected.
 6. **Export** (Ctrl+E) writes `.opus`, `.wav`, or goniometer `.mp4`.
 
@@ -79,7 +91,8 @@ cott-daw (GUI + PipeWire/cpal)
 cott-vst-worker  (one process per plugin instance)
 ```
 
-- **`cott-core`** — project model, typed DAG, DSP graph compiler, offline render
+- **`cott-core`** — project model, typed DAG, DSP graph compiler, offline render (includes built-in CottSynth)
+- **`cott-synth-dsp` / `cott-synth`** — shared synth engine + redistributable VST3
 - **`cott-ipc`** — length-prefixed bincode protocol + shared-memory audio/MIDI ring
 - Plugin crashes kill only the worker; the DAW silences/bypasses that node and keeps transport running
 

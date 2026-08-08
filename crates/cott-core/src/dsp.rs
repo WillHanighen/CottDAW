@@ -5,6 +5,7 @@ use crate::clips::ScheduledMidiEvent;
 use crate::graph::{CompiledPlan, NodeKind, PortType};
 use crate::ids::{NodeId, PortId, TrackId};
 use crate::time::{SamplePos, TempoMap, TransportState};
+use cott_synth_dsp::{MidiNoteEvent, PolySynth};
 use indexmap::IndexMap;
 use std::sync::Arc;
 
@@ -137,6 +138,8 @@ pub struct ProcessContext<'a> {
     pub preview_midi: &'a [(TrackId, ScheduledMidiEvent)],
     /// Per-node PDC delay line state (channel rings).
     pub pdc_state: &'a mut IndexMap<NodeId, Vec<Vec<f32>>>,
+    /// Persistent CottSynth voice state keyed by graph node.
+    pub builtin_synth_state: &'a mut IndexMap<NodeId, PolySynth>,
 }
 
 pub trait PluginAudioHost {
@@ -355,6 +358,58 @@ pub fn process_block(
                 master.add_from(&input);
                 output = input;
             }
+            NodeKind::BuiltinSynth { params } => {
+                let midi = collect_midi_for_instrument(plan, *node_id, ctx);
+                let events: Vec<MidiNoteEvent> = midi
+                    .iter()
+                    .filter_map(|ev| {
+                        let status = ev.status & 0xf0;
+                        let channel = ev.status & 0x0f;
+                        if status == 0x90 && ev.data2 > 0 {
+                            Some(MidiNoteEvent {
+                                sample_offset: ev.sample_offset,
+                                note: ev.data1,
+                                velocity: ev.data2,
+                                channel,
+                                on: true,
+                            })
+                        } else if status == 0x80 || (status == 0x90 && ev.data2 == 0) {
+                            Some(MidiNoteEvent {
+                                sample_offset: ev.sample_offset,
+                                note: ev.data1,
+                                velocity: 0,
+                                channel,
+                                on: false,
+                            })
+                        } else if status == 0xb0 && (ev.data1 == 123 || ev.data1 == 120) {
+                            // All Notes Off / All Sound Off → release every voice.
+                            None
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                let panic = midi.iter().any(|ev| {
+                    let status = ev.status & 0xf0;
+                    status == 0xb0 && (ev.data1 == 123 || ev.data1 == 120)
+                });
+                let synth = ctx
+                    .builtin_synth_state
+                    .entry(*node_id)
+                    .or_insert_with(|| PolySynth::new(ctx.sample_rate as f32));
+                if (synth.sample_rate() - ctx.sample_rate as f32).abs() > 0.5 {
+                    synth.set_sample_rate(ctx.sample_rate as f32);
+                }
+                if panic {
+                    synth.all_notes_off(params);
+                }
+                // Ensure stereo buffers exist.
+                if output.channel_count() < 2 {
+                    output = AudioBuffer::silent(2, frames);
+                }
+                let (left, right) = output.channels.split_at_mut(1);
+                synth.process_block(params, &events, &mut left[0], &mut right[0]);
+            }
             NodeKind::PluginInstrument {
                 instance_id,
                 failed,
@@ -553,6 +608,7 @@ mod tests {
         let mut host = NullPluginHost;
         let mut meters = IndexMap::new();
         let mut pdc_state = IndexMap::new();
+        let mut builtin_synth_state = IndexMap::new();
         let mut ctx = ProcessContext {
             sample_rate: 48_000,
             block_start: SamplePos(0),
@@ -565,6 +621,7 @@ mod tests {
             plugin_audio: &mut host,
             preview_midi: &[],
             pdc_state: &mut pdc_state,
+            builtin_synth_state: &mut builtin_synth_state,
         };
         let out = process_block(&plan, &mut ctx, &mut meters);
         assert_eq!(out.peak(), 0.0);
@@ -727,6 +784,7 @@ mod tests {
         };
         let mut meters = IndexMap::new();
         let mut pdc_state = IndexMap::new();
+        let mut builtin_synth_state = IndexMap::new();
         let mut ctx = ProcessContext {
             sample_rate: 48_000,
             block_start: SamplePos(0),
@@ -739,6 +797,7 @@ mod tests {
             plugin_audio: &mut host,
             preview_midi: &[],
             pdc_state: &mut pdc_state,
+            builtin_synth_state: &mut builtin_synth_state,
         };
 
         let out = process_block(&plan, &mut ctx, &mut meters);
@@ -796,6 +855,7 @@ mod tests {
         let tempo = TempoMap::default();
         let mut host = NullPluginHost;
         let mut pdc_state = IndexMap::new();
+        let mut builtin_synth_state = IndexMap::new();
         let mut meters = IndexMap::new();
         let mut g = AudioGraph::new();
         let src = g.add_node(GraphNode::audio_clip_source(track, "src"));
@@ -815,6 +875,7 @@ mod tests {
             plugin_audio: &mut host,
             preview_midi: &[],
             pdc_state: &mut pdc_state,
+            builtin_synth_state: &mut builtin_synth_state,
         };
         let out = process_block(&plan, &mut ctx, &mut meters);
         // offset -100 => first output frame maps before buffer start → silence.

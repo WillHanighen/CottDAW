@@ -134,6 +134,7 @@ pub enum PianoNoteDrag {
         pitch: u8,
         origin_beat: f64,
         end_beat: f64,
+        velocity: u8,
         chord: Option<ChordKind>,
     },
     /// Drag note body to move pitch/start (moves the whole selection).
@@ -156,6 +157,15 @@ pub enum PianoNoteDrag {
         before: MidiNote,
         start_beats: f64,
         length_beats: f64,
+    },
+    /// Drag in the velocity lane (or Alt+drag a note) to change velocity.
+    Velocity {
+        clip_id: ClipId,
+        note_id: NoteId,
+        /// Snapshots of every selected note at drag start (includes `note_id`).
+        before: Vec<MidiNote>,
+        /// Live velocity of the grabbed note (1..=127).
+        velocity: u8,
     },
     /// Shift-drag empty grid to lasso-select notes.
     SelectLasso {
@@ -226,6 +236,8 @@ pub struct UiState {
     pub piano_drag: Option<PianoNoteDrag>,
     /// Last pitch auditioned from the piano roll (avoid retrigger spam).
     pub piano_preview_pitch: Option<u8>,
+    /// Velocity used for newly drawn notes (updated whenever velocity is edited).
+    pub draw_velocity: u8,
     /// When enabled, drawing one note stamps the selected chord.
     pub chord_stamp_enabled: bool,
     pub chord_kind: ChordKind,
@@ -252,6 +264,16 @@ pub struct UiState {
     pub export_dialog: ExportDialogState,
 }
 
+impl UiState {
+    /// Scroll Y that puts middle C (MIDI 60) near the top of the piano roll.
+    fn piano_default_scroll_y() -> f32 {
+        const KEY_H: f32 = 14.0; // matches piano_roll::BASE_KEY_H
+        const MIDDLE_C: u8 = 60;
+        let row = 127i32 - MIDDLE_C as i32; // top row is MIDI 127
+        (row as f32 * KEY_H - 40.0).max(0.0)
+    }
+}
+
 impl Default for UiState {
     fn default() -> Self {
         Self {
@@ -262,9 +284,10 @@ impl Default for UiState {
             beats_per_pixel: 0.02,
             scroll_x: 0.0,
             piano_zoom: 1.0,
-            piano_scroll_offset: egui::Vec2::ZERO,
+            // Full MIDI roll is tall; open near middle C (MIDI 60) instead of G9.
+            piano_scroll_offset: egui::vec2(0.0, Self::piano_default_scroll_y()),
             piano_viewport: egui::Rect::ZERO,
-            piano_pending_offset: None,
+            piano_pending_offset: Some(egui::vec2(0.0, Self::piano_default_scroll_y())),
             show_browser: true,
             plugin_filter: String::new(),
             lower_panel_height: 280.0,
@@ -276,6 +299,7 @@ impl Default for UiState {
             graph_panning: false,
             piano_drag: None,
             piano_preview_pitch: None,
+            draw_velocity: 100,
             chord_stamp_enabled: false,
             chord_kind: ChordKind::default(),
             selected_notes: Vec::new(),
@@ -422,6 +446,7 @@ fn draw_browser(app: &mut CottApp, ui: &mut egui::Ui) {
     ui.text_edit_singleline(&mut app.ui.plugin_filter)
         .on_hover_text("Filter VSTs");
     ui.weak("Click a plugin to load it, or right-click the routing canvas.");
+    ui.weak("CottSynth is always listed (built-in VST3).");
     if app.is_scanning_plugins() {
         ui.weak("Scanning… (filesystem only; Wine starts when you load a plugin)");
     }
@@ -488,7 +513,7 @@ fn draw_browser(app: &mut CottApp, ui: &mut egui::Ui) {
             }
         }
         if catalog_is_empty && !app.is_scanning_plugins() {
-            ui.weak("No plugins found in VST2/VST3/CLAP/LV2 search paths");
+            ui.weak("No third-party plugins found (CottSynth should still appear above)");
         }
     });
 }
@@ -530,7 +555,7 @@ fn draw_automation(app: &mut CottApp, ui: &mut egui::Ui) {
 
 fn draw_plugin_inspector(app: &mut CottApp, ui: &mut egui::Ui) {
     let Some(node_id) = app.ui.selected_node else {
-        ui.weak("Select a plugin node in the routing graph");
+        ui.weak("Select a node in the routing graph");
         return;
     };
     let Some(node) = app.project.graph.nodes.get(&node_id).cloned() else {
@@ -569,6 +594,10 @@ fn draw_plugin_inspector(app: &mut CottApp, ui: &mut egui::Ui) {
                 }
             }
             Some(*instance_id)
+        }
+        cott_core::graph::NodeKind::BuiltinSynth { params } => {
+            draw_builtin_synth_inspector(app, ui, node_id, *params);
+            return;
         }
         cott_core::graph::NodeKind::GainPan {
             gain_db, pan, mute, ..
@@ -669,5 +698,85 @@ fn draw_plugin_inspector(app: &mut CottApp, ui: &mut egui::Ui) {
         {
             app.plugin_host.lock().set_param(instance_id, id, value);
         }
+    }
+}
+
+fn draw_builtin_synth_inspector(
+    app: &mut CottApp,
+    ui: &mut egui::Ui,
+    node_id: NodeId,
+    mut params: cott_core::SynthParams,
+) {
+    ui.label(format!(
+        "Built-in CottSynth · {} voices",
+        cott_core::MAX_VOICES
+    ));
+    ui.separator();
+
+    ui.horizontal(|ui| {
+        ui.label("Waveform");
+        egui::ComboBox::from_id_salt("cott_synth_wave")
+            .selected_text(params.waveform.label())
+            .show_ui(ui, |ui| {
+                for wave in cott_core::Waveform::ALL {
+                    ui.selectable_value(&mut params.waveform, wave, wave.label());
+                }
+            });
+    });
+
+    let mut changed = false;
+    if ui
+        .add(egui::Slider::new(&mut params.adsr.attack_ms, 0.0..=2000.0).text("Attack ms"))
+        .changed()
+    {
+        changed = true;
+    }
+    if ui
+        .add(egui::Slider::new(&mut params.adsr.decay_ms, 0.0..=2000.0).text("Decay ms"))
+        .changed()
+    {
+        changed = true;
+    }
+    if ui
+        .add(egui::Slider::new(&mut params.adsr.sustain, 0.0..=1.0).text("Sustain"))
+        .changed()
+    {
+        changed = true;
+    }
+    if ui
+        .add(egui::Slider::new(&mut params.adsr.release_ms, 0.0..=5000.0).text("Release ms"))
+        .changed()
+    {
+        changed = true;
+    }
+    if matches!(params.waveform, cott_core::Waveform::Pulse)
+        && ui
+            .add(egui::Slider::new(&mut params.pulse_width, 0.05..=0.95).text("Pulse width"))
+            .changed()
+    {
+        changed = true;
+    }
+    if ui
+        .add(egui::Slider::new(&mut params.gain, 0.0..=1.0).text("Gain"))
+        .changed()
+    {
+        changed = true;
+    }
+
+    // ComboBox doesn't report .changed() on the outer slider path — compare against graph.
+    if let Some(node) = app.project.graph.nodes.get(&node_id)
+        && let cott_core::graph::NodeKind::BuiltinSynth { params: old } = &node.kind
+        && *old != params
+    {
+        changed = true;
+    }
+
+    if changed
+        && let Some(node) = app.project.graph.nodes.get_mut(&node_id)
+        && let cott_core::graph::NodeKind::BuiltinSynth { params: slot } = &mut node.kind
+    {
+        *slot = params.clamped();
+        app.project.touch();
+        app.sync_engine();
     }
 }

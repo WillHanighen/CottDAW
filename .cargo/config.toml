@@ -1,0 +1,5 @@
+[alias]
+# Build + bundle CottSynth.vst3 for redistribution (output under target/bundled/).
+bundle-synth = "run -p cott-xtask --release -- bundle cott-synth --release"
+# Debug bundle (faster iteration while developing the plugin).
+bundle-synth-debug = "run -p cott-xtask -- bundle cott-synth"

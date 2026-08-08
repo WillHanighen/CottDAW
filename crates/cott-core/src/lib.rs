@@ -15,6 +15,7 @@ pub mod scale;
 pub mod time;
 pub mod visualizers;
 
+pub use cott_synth_dsp::{AdsrParams, SynthParams, Waveform, MAX_VOICES};
 pub use ids::*;
 pub use project::Project;
 pub use time::{BeatPos, SamplePos, TempoMap, TransportState};

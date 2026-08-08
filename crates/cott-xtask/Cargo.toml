@@ -1,0 +1,9 @@
+[package]
+name = "cott-xtask"
+version.workspace = true
+edition = "2021"
+license.workspace = true
+publish = false
+
+[dependencies]
+nih_plug_xtask = { git = "https://github.com/robbert-vdh/nih-plug.git" }

@@ -30,8 +30,10 @@ Use **+ MIDI Track** or **+ Audio Track** in the top bar.
 
 Default signal paths:
 
-- **MIDI:** clip source → (optional plugin instrument) → gain/pan → master
+- **MIDI:** clip source → **CottSynth** (built-in VST3) → gain/pan → master
 - **Audio:** clip source → gain/pan → master
+
+**CottSynth** always appears at the top of the plugin browser (even with an empty scan). It loads through the normal sandboxed VST3 worker and has its own editor window — open it from the **Plugins** tab (**Open Native Editor**) or the routing context menu, same as any other instrument. Waveforms: sine / saw / square / triangle / pulse / noise, plus ADSR. Loading another instrument from the browser replaces it.
 
 ### Arrangement
 
@@ -49,14 +51,15 @@ Default signal paths:
 1. Select a MIDI clip (or create one and switch to **Piano Roll**).
 2. **Left-click** to add, move, or resize notes (¼-beat quantize).
 3. **Ctrl+click** toggles notes in a multi-selection; **Shift+drag** on empty grid draws a lasso selection. Dragging any selected note moves the whole selection together. Chord stamp selects the notes it places (replacing any previous selection).
-4. **Ctrl+C / Ctrl+V** copy and paste selected notes; paste aligns the earliest note to the mouse (or the playhead).
-5. **Delete / Backspace** removes the selected notes (or the whole clip when no notes are selected).
-6. **Escape** cancels an in-progress draw/move/resize/lasso, or clears the note selection.
-7. **Right-click** a note to remove it (or the whole selection if that note is selected).
-8. Double-click **Editing: …** to rename the clip.
-9. Click piano keys to audition pitches while stopped.
+4. Change **velocity** with the **Vel** lane under the grid (drag bars), **Alt+drag** a note, or the Velocity control when notes are selected. With nothing selected, editing a bar adjusts every note that starts on that beat (e.g. a chord); with a selection, only the selected notes change. Note brightness and fill height also show velocity.
+5. **Ctrl+C / Ctrl+V** copy and paste selected notes (including velocity); paste aligns the earliest note to the mouse (or the playhead).
+6. **Delete / Backspace** removes the selected notes (or the whole clip when no notes are selected).
+7. **Escape** cancels an in-progress draw/move/resize/lasso, or clears the note selection.
+8. **Right-click** a note to remove it (or the whole selection if that note is selected).
+9. Double-click **Editing: …** to rename the clip.
+10. Click piano keys to audition pitches while stopped.
 
-Pitch range shown is roughly C2–C6. Editing notes can grow or shrink the clip length. Each MIDI clip stores its own scale guide in the project file.
+Pitch range shown is the full MIDI range (C-1–G9 in scientific pitch). Editing notes can grow or shrink the clip length. Each MIDI clip stores its own scale guide in the project file. Playback applies a tiny (±5%) deterministic humanization to note timing and velocity so parts feel less robotic — the stored notes are unchanged.
 
 ## Plugins
 
@@ -130,7 +133,7 @@ Relative media paths are stored inside the archive; missing assets are marked on
 
 | Button | Formats | Notes |
 |--------|---------|--------|
-| Import Audio | WAV, FLAC, Ogg, MP3, AAC, … | Resampled to the project sample rate; creates a clip on the selected audio track |
+| Import Audio | WAV, FLAC, Ogg Vorbis, Ogg Opus (`.ogg`/`.opus`), MP3, AAC, … | Resampled to the project sample rate; creates a clip on the selected audio track |
 | Import MIDI | Standard MIDI File (`.mid`) | Creates a MIDI clip at the playhead; project tempo is authoritative |
 
 ## Export

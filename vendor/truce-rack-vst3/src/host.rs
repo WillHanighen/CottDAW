@@ -17,7 +17,10 @@ use vst3::Steinberg::Vst::{
     IParamValueQueue, IParamValueQueueTrait, IParameterChanges, IParameterChangesTrait, ParamID,
     ParamValue, String128,
 };
-use vst3::Steinberg::{TUID, kNoInterface, kResultFalse, kResultOk};
+use vst3::Steinberg::{
+    IPlugFrame, IPlugFrameTrait, IPlugView, IPlugViewTrait, TUID, ViewRect, kNoInterface,
+    kResultFalse, kResultOk,
+};
 use vst3::{Class, ComPtr, ComRef, ComWrapper};
 
 // ---------------------------------------------------------------------------
@@ -352,11 +355,73 @@ impl RunLoopState {
         if n <= 0 {
             return;
         }
+        let mut stale = Vec::new();
         for (i, (fd, handler)) in fds.into_iter().enumerate() {
-            if pollfds.get(i).is_some_and(|p| p.revents != 0) {
+            let Some(p) = pollfds.get(i) else {
+                continue;
+            };
+            // Drop closed/invalid FDs left behind if a plugin unregistered poorly.
+            if p.revents & (libc::POLLNVAL | libc::POLLHUP | libc::POLLERR) != 0 {
+                stale.push(handler.as_ptr());
+                continue;
+            }
+            if p.revents != 0 {
                 unsafe { handler.onFDIsSet(fd) };
             }
         }
+        if !stale.is_empty() {
+            if let Ok(mut list) = self.fds.lock() {
+                list.retain(|e| !stale.contains(&e.handler.as_ptr()));
+            }
+        }
+    }
+
+    fn register_event_handler(&self, handler: *mut IEventHandler, fd: FileDescriptor) -> i32 {
+        let Some(href) = (unsafe { ComRef::from_raw(handler) }) else {
+            return kResultFalse;
+        };
+        let kept = href.to_com_ptr();
+        if let Ok(mut fds) = self.fds.lock() {
+            let raw = kept.as_ptr();
+            fds.retain(|e| e.handler.as_ptr() != raw);
+            fds.push(FdEntry {
+                fd,
+                handler: kept,
+            });
+        }
+        kResultOk
+    }
+
+    fn unregister_event_handler(&self, handler: *mut IEventHandler) -> i32 {
+        if let Ok(mut fds) = self.fds.lock() {
+            fds.retain(|e| e.handler.as_ptr() != handler);
+        }
+        kResultOk
+    }
+
+    fn register_timer(&self, handler: *mut ITimerHandler, milliseconds: TimerInterval) -> i32 {
+        let Some(href) = (unsafe { ComRef::from_raw(handler) }) else {
+            return kResultFalse;
+        };
+        let kept = href.to_com_ptr();
+        let interval = Duration::from_millis(milliseconds.max(1));
+        if let Ok(mut timers) = self.timers.lock() {
+            let raw = kept.as_ptr();
+            timers.retain(|t| t.handler.as_ptr() != raw);
+            timers.push(TimerEntry {
+                handler: kept,
+                interval,
+                next_fire: Instant::now() + interval,
+            });
+        }
+        kResultOk
+    }
+
+    fn unregister_timer(&self, handler: *mut ITimerHandler) -> i32 {
+        if let Ok(mut timers) = self.timers.lock() {
+            timers.retain(|t| t.handler.as_ptr() != handler);
+        }
+        kResultOk
     }
 }
 
@@ -418,26 +483,11 @@ impl IRunLoopTrait for HostContext {
         handler: *mut IEventHandler,
         fd: FileDescriptor,
     ) -> i32 {
-        let Some(href) = (unsafe { ComRef::from_raw(handler) }) else {
-            return kResultFalse;
-        };
-        let kept = href.to_com_ptr();
-        if let Ok(mut fds) = self.run_loop.fds.lock() {
-            let raw = kept.as_ptr();
-            fds.retain(|e| e.handler.as_ptr() != raw);
-            fds.push(FdEntry {
-                fd,
-                handler: kept,
-            });
-        }
-        kResultOk
+        self.run_loop.register_event_handler(handler, fd)
     }
 
     unsafe fn unregisterEventHandler(&self, handler: *mut IEventHandler) -> i32 {
-        if let Ok(mut fds) = self.run_loop.fds.lock() {
-            fds.retain(|e| e.handler.as_ptr() != handler);
-        }
-        kResultOk
+        self.run_loop.unregister_event_handler(handler)
     }
 
     unsafe fn registerTimer(
@@ -445,28 +495,11 @@ impl IRunLoopTrait for HostContext {
         handler: *mut ITimerHandler,
         milliseconds: TimerInterval,
     ) -> i32 {
-        let Some(href) = (unsafe { ComRef::from_raw(handler) }) else {
-            return kResultFalse;
-        };
-        let kept = href.to_com_ptr();
-        let interval = Duration::from_millis(milliseconds.max(1));
-        if let Ok(mut timers) = self.run_loop.timers.lock() {
-            let raw = kept.as_ptr();
-            timers.retain(|t| t.handler.as_ptr() != raw);
-            timers.push(TimerEntry {
-                handler: kept,
-                interval,
-                next_fire: Instant::now() + interval,
-            });
-        }
-        kResultOk
+        self.run_loop.register_timer(handler, milliseconds)
     }
 
     unsafe fn unregisterTimer(&self, handler: *mut ITimerHandler) -> i32 {
-        if let Ok(mut timers) = self.run_loop.timers.lock() {
-            timers.retain(|t| t.handler.as_ptr() != handler);
-        }
-        kResultOk
+        self.run_loop.unregister_timer(handler)
     }
 }
 
@@ -496,6 +529,113 @@ impl HostServices {
     pub fn pump(&self) {
         self.run_loop.pump();
     }
+
+    /// Shared with `IPlugFrame` so Linux plugins can `queryInterface` for `IRunLoop`.
+    pub fn run_loop(&self) -> Arc<RunLoopState> {
+        Arc::clone(&self.run_loop)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// IPlugFrame — plugin → host editor resize requests (+ Linux IRunLoop)
+// ---------------------------------------------------------------------------
+
+/// Latest size requested by the plugin via `IPlugFrame::resizeView`.
+#[derive(Clone, Default)]
+pub struct PendingViewResize {
+    inner: Arc<Mutex<Option<(u32, u32)>>>,
+}
+
+impl PendingViewResize {
+    pub fn push(&self, width: u32, height: u32) {
+        if let Ok(mut slot) = self.inner.lock() {
+            *slot = Some((width.max(1), height.max(1)));
+        }
+    }
+
+    pub fn take(&self) -> Option<(u32, u32)> {
+        self.inner.lock().ok().and_then(|mut slot| slot.take())
+    }
+}
+
+/// Steinberg requires Linux hosts to expose `IRunLoop` from the same object as
+/// `IPlugFrame`. nih-plug casts the frame to `IRunLoop` in `setFrame`; without
+/// that, the egui/OpenGL editor often comes back as a black window after close.
+pub struct PlugFrame {
+    pending: PendingViewResize,
+    run_loop: Arc<RunLoopState>,
+}
+
+impl PlugFrame {
+    pub fn new(pending: PendingViewResize, run_loop: Arc<RunLoopState>) -> Self {
+        Self { pending, run_loop }
+    }
+}
+
+impl Class for PlugFrame {
+    type Interfaces = (IPlugFrame, IRunLoop);
+}
+
+impl IPlugFrameTrait for PlugFrame {
+    unsafe fn resizeView(&self, view: *mut IPlugView, new_size: *mut ViewRect) -> i32 {
+        if new_size.is_null() {
+            return kResultFalse;
+        }
+        let rect = unsafe { *new_size };
+        let width = (rect.right - rect.left).max(1) as u32;
+        let height = (rect.bottom - rect.top).max(1) as u32;
+        self.pending.push(width, height);
+        // Confirm to the plugin; the host applies the platform window size on
+        // the next UI pump.
+        if let Some(view) = unsafe { ComRef::from_raw(view) } {
+            let mut confirmed = ViewRect {
+                left: 0,
+                top: 0,
+                right: rect.right - rect.left,
+                bottom: rect.bottom - rect.top,
+            };
+            let _ = unsafe { view.onSize(&raw mut confirmed) };
+        }
+        kResultOk
+    }
+}
+
+impl IRunLoopTrait for PlugFrame {
+    unsafe fn registerEventHandler(
+        &self,
+        handler: *mut IEventHandler,
+        fd: FileDescriptor,
+    ) -> i32 {
+        self.run_loop.register_event_handler(handler, fd)
+    }
+
+    unsafe fn unregisterEventHandler(&self, handler: *mut IEventHandler) -> i32 {
+        self.run_loop.unregister_event_handler(handler)
+    }
+
+    unsafe fn registerTimer(
+        &self,
+        handler: *mut ITimerHandler,
+        milliseconds: TimerInterval,
+    ) -> i32 {
+        self.run_loop.register_timer(handler, milliseconds)
+    }
+
+    unsafe fn unregisterTimer(&self, handler: *mut ITimerHandler) -> i32 {
+        self.run_loop.unregister_timer(handler)
+    }
+}
+
+/// Create an `IPlugFrame` (+ `IRunLoop`) sharing the host run-loop state.
+pub fn create_plug_frame(
+    run_loop: Arc<RunLoopState>,
+) -> (PendingViewResize, ComPtr<IPlugFrame>) {
+    let pending = PendingViewResize::default();
+    let wrapper = ComWrapper::new(PlugFrame::new(pending.clone(), run_loop));
+    let frame = wrapper
+        .to_com_ptr::<IPlugFrame>()
+        .expect("PlugFrame exposes IPlugFrame");
+    (pending, frame)
 }
 
 /// Apply outgoing parameter changes from `process()` back onto the controller.

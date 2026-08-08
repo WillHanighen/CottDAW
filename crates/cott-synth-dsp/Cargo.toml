@@ -1,0 +1,9 @@
+[package]
+name = "cott-synth-dsp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Polyphonic oscillator + ADSR DSP shared by CottSynth (built-in and VST3)"
+
+[dependencies]
+serde = { workspace = true }

@@ -9,11 +9,13 @@ use eframe::egui;
 const BASE_KEY_H: f32 = 14.0;
 const BASE_BEAT_W: f32 = 40.0;
 const GUTTER_W: f32 = 40.0;
-const KEYS: usize = 48; // C2..C6 roughly
-const BASE_PITCH: u8 = 36;
+const KEYS: usize = 128; // Full MIDI range: C-1..G9 (scientific pitch)
+const BASE_PITCH: u8 = 0;
 const QUANTIZE: f64 = 0.25;
 const MIN_NOTE_LEN: f64 = 0.25;
 const RESIZE_HANDLE_PX: f32 = 8.0;
+/// Height of the velocity lane under the key grid (does not scale with zoom).
+const VELOCITY_LANE_H: f32 = 64.0;
 
 /// Accent for the tonic / root of the scale.
 const ROOT_ACCENT: egui::Color32 = egui::Color32::from_rgb(255, 176, 74);
@@ -134,11 +136,12 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
             pending_zoom_pct = Some(100);
         }
         ui.weak(
-            "LMB: draw/move/resize · Ctrl+LMB: multi-select · Shift+drag: lasso · Esc: cancel/deselect · RMB: delete · Shift+scroll: zoom",
+            "LMB: draw/move/resize · Alt+drag note or velocity lane: velocity · Ctrl+LMB: multi-select · Shift+drag: lasso · Esc: cancel/deselect · RMB: delete · Shift+scroll: zoom",
         );
     });
 
     scale_toolbar(app, ui, clip_id);
+    velocity_toolbar(app, ui, clip_id, &notes);
 
     let scale = app
         .project
@@ -206,7 +209,8 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
     let key_h = BASE_KEY_H * zoom;
     let beat_w = BASE_BEAT_W * zoom;
 
-    let height = KEYS as f32 * key_h;
+    let keys_height = KEYS as f32 * key_h;
+    let height = keys_height + VELOCITY_LANE_H;
     let width = (view_beats as f32 * beat_w).max(beats_per_bar as f32 * 2.0 * beat_w);
 
     // Solid bars reserve a gutter instead of floating/expanding over the
@@ -231,9 +235,33 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
         let painter = ui.painter_at(rect);
         let grid = egui::Rect::from_min_size(
             rect.min + egui::vec2(GUTTER_W, 0.0),
-            egui::vec2(width, height),
+            egui::vec2(width, keys_height),
+        );
+        let vel_lane = egui::Rect::from_min_size(
+            egui::pos2(grid.left(), grid.bottom()),
+            egui::vec2(width, VELOCITY_LANE_H),
+        );
+        let vel_gutter = egui::Rect::from_min_size(
+            egui::pos2(rect.left(), grid.bottom()),
+            egui::vec2(GUTTER_W, VELOCITY_LANE_H),
         );
         painter.rect_filled(grid, 0.0, egui::Color32::from_rgb(30, 32, 36));
+        painter.rect_filled(vel_lane, 0.0, egui::Color32::from_rgb(26, 28, 32));
+        painter.rect_filled(vel_gutter, 0.0, egui::Color32::from_rgb(34, 36, 40));
+        painter.text(
+            egui::pos2(vel_gutter.center().x, vel_gutter.center().y),
+            egui::Align2::CENTER_CENTER,
+            "Vel",
+            egui::FontId::proportional(11.0),
+            egui::Color32::from_rgb(160, 165, 175),
+        );
+        painter.line_segment(
+            [
+                egui::pos2(rect.left(), vel_lane.top()),
+                egui::pos2(rect.right(), vel_lane.top()),
+            ],
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(70, 74, 82)),
+        );
 
         // Shade the region past the current clip length (editable padding).
         let clip_end_x = grid.left() + clip.length_beats as f32 * beat_w;
@@ -249,7 +277,7 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
         }
 
         for i in 0..KEYS {
-            let pitch = BASE_PITCH + (KEYS - 1 - i) as u8;
+            let pitch = (BASE_PITCH as usize + KEYS - 1 - i) as u8;
             let y = grid.top() + i as f32 * key_h;
             let black = matches!(pitch % 12, 1 | 3 | 6 | 8 | 10);
             let in_scale = scale.highlight && scale.contains(pitch);
@@ -346,6 +374,7 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
         let drag_note_ids: Vec<NoteId> = match &app.ui.piano_drag {
             Some(PianoNoteDrag::Move { before, .. }) => before.iter().map(|n| n.id).collect(),
             Some(PianoNoteDrag::Resize { note_id, .. }) => vec![*note_id],
+            Some(PianoNoteDrag::Velocity { before, .. }) => before.iter().map(|n| n.id).collect(),
             _ => Vec::new(),
         };
 
@@ -366,17 +395,28 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
         }
 
         // Ghost / live drag note
-        for ghost in drag_ghosts(&app.ui.piano_drag) {
+        let ghosts = drag_ghosts(&app.ui.piano_drag);
+        for ghost in &ghosts {
             paint_note(
                 &painter,
                 &grid,
-                &ghost,
+                ghost,
                 note_color(scale, ghost.pitch, true),
                 key_h,
                 beat_w,
                 app.ui.selected_notes.contains(&ghost.id),
             );
         }
+
+        paint_velocity_lane(
+            &painter,
+            &vel_lane,
+            &notes,
+            &ghosts,
+            &app.ui.selected_notes,
+            beat_w,
+            clip.length_beats,
+        );
 
         // Lasso marquee
         if let Some(PianoNoteDrag::SelectLasso {
@@ -412,43 +452,57 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
 
         // Track hover beat for paste anchoring (clip-local).
         if let Some(pos) = ui.input(|i| i.pointer.hover_pos()) {
-            if grid.contains(pos) {
+            if grid.contains(pos) || vel_lane.contains(pos) {
                 app.ui.piano_hover_beat = Some(beat_at_x(grid, pos.x, beat_w).max(0.0));
             }
         }
 
-        // Use the canvas Response — not global pointer state — so overlays
-        // (export modal, arrangement track strip, etc.) own their clicks.
-        // Prefer is_pointer_button_down_on over drag_started: click_and_drag
-        // delays drag_started until the pointer moves.
-        if resp.is_pointer_button_down_on() {
-            if ui.input(|i| i.pointer.primary_pressed()) {
-                if let Some(pos) = resp.interact_pointer_pos() {
-                    // Piano keys: audition only
-                    if pos.x < grid.left() && pos.x >= rect.left() && grid.y_range().contains(pos.y)
-                    {
-                        if let Some(pitch) = pitch_at_y(grid, pos.y, key_h) {
-                            app.preview_note(track_id, pitch);
-                        }
-                    } else if grid.contains(pos) {
-                        let (ctrl, shift) = ui.input(|i| {
-                            (i.modifiers.command || i.modifiers.ctrl, i.modifiers.shift)
-                        });
-                        start_drag(
-                            app, clip_id, &notes, &grid, pos, track_id, key_h, beat_w, ctrl, shift,
-                        );
+        // Start interactions only when the press began on this canvas.
+        // Continue / commit while the button is held even if the pointer leaves
+        // the widget — otherwise draw/move freezes mid-drag (common near edges).
+        if resp.is_pointer_button_down_on() && ui.input(|i| i.pointer.primary_pressed()) {
+            if let Some(pos) = resp.interact_pointer_pos() {
+                // Piano keys: audition only
+                if pos.x < grid.left() && pos.x >= rect.left() && grid.y_range().contains(pos.y) {
+                    if let Some(pitch) = pitch_at_y(grid, pos.y, key_h) {
+                        app.preview_note(track_id, pitch);
                     }
-                }
-            }
-
-            if app.ui.piano_drag.is_some() {
-                if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
-                    update_drag(app, &grid, pos, track_id, view_beats, key_h, beat_w);
+                } else if vel_lane.contains(pos) {
+                    let (ctrl, shift) = ui.input(|i| {
+                        (i.modifiers.command || i.modifiers.ctrl, i.modifiers.shift)
+                    });
+                    start_velocity_drag(
+                        app, clip_id, &notes, &grid, &vel_lane, pos, track_id, beat_w, ctrl, shift,
+                    );
+                } else if grid.contains(pos) {
+                    let (ctrl, shift, alt) = ui.input(|i| {
+                        (
+                            i.modifiers.command || i.modifiers.ctrl,
+                            i.modifiers.shift,
+                            i.modifiers.alt,
+                        )
+                    });
+                    start_drag(
+                        app, clip_id, &notes, &grid, pos, track_id, key_h, beat_w, ctrl, shift, alt,
+                    );
                 }
             }
         }
 
-        if ui.input(|i| i.pointer.primary_released()) && app.ui.piano_drag.is_some() {
+        if app.ui.piano_drag.is_some() && ui.input(|i| i.pointer.primary_down()) {
+            if let Some(pos) = ui.input(|i| {
+                i.pointer
+                    .interact_pos()
+                    .or_else(|| i.pointer.hover_pos())
+                    .or_else(|| i.pointer.latest_pos())
+            }) {
+                update_drag(
+                    app, &grid, &vel_lane, pos, track_id, view_beats, key_h, beat_w,
+                );
+            }
+        }
+
+        if app.ui.piano_drag.is_some() && !ui.input(|i| i.pointer.primary_down()) {
             commit_drag(app, &notes, &grid, key_h, beat_w);
         }
 
@@ -562,6 +616,82 @@ fn scale_toolbar(app: &mut CottApp, ui: &mut egui::Ui, clip_id: cott_core::ids::
     }
 }
 
+/// Velocity readout / precise edit for the current note selection.
+/// Always shown so selecting notes does not reflow the piano-roll layout.
+fn velocity_toolbar(
+    app: &mut CottApp,
+    ui: &mut egui::Ui,
+    clip_id: cott_core::ids::ClipId,
+    notes: &[MidiNote],
+) {
+    let selected: Vec<&MidiNote> = notes
+        .iter()
+        .filter(|n| app.ui.selected_notes.contains(&n.id))
+        .collect();
+    let has_selection = !selected.is_empty();
+    let mixed = has_selection && selected.windows(2).any(|w| w[0].velocity != w[1].velocity);
+    let mut vel = if has_selection {
+        selected[0].velocity as i32
+    } else {
+        app.ui.draw_velocity as i32
+    };
+
+    ui.horizontal(|ui| {
+        ui.label("Velocity");
+        // Fixed-width slot so "mixed" appearing/disappearing does not reflow the grid.
+        let mixed_w = 40.0;
+        ui.allocate_ui_with_layout(
+            egui::vec2(mixed_w, ui.spacing().interact_size.y),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                if mixed {
+                    ui.weak("mixed");
+                }
+            },
+        );
+        let resp = ui.add_enabled(
+            has_selection,
+            egui::DragValue::new(&mut vel).range(1..=127).speed(1.0),
+        );
+        if has_selection && resp.changed() {
+            let vel = vel.clamp(1, 127) as u8;
+            app.ui.draw_velocity = vel;
+            let before: Vec<MidiNote> = selected.iter().map(|n| (*n).clone()).collect();
+            let after: Vec<MidiNote> = before
+                .iter()
+                .map(|n| MidiNote {
+                    velocity: vel,
+                    ..n.clone()
+                })
+                .collect();
+            if after.len() == 1 {
+                if let (Some(b), Some(a)) = (before.into_iter().next(), after.into_iter().next()) {
+                    app.edit_note(clip_id, b, a);
+                }
+            } else {
+                app.edit_notes(clip_id, before, after);
+            }
+            if let Some(track_id) = app
+                .project
+                .clips
+                .iter()
+                .find(|c| c.id == clip_id)
+                .map(|c| c.track_id)
+            {
+                if let Some(n) = selected.first() {
+                    app.preview_note_vel(track_id, n.pitch, vel);
+                }
+            }
+        }
+        resp.on_hover_text(if has_selection {
+            "Drag to set velocity for the selection (1–127). New notes use this value."
+        } else {
+            "Select a note to edit velocity. New notes use the last set value."
+        });
+        ui.weak("· drag bars below, or Alt+drag a note");
+    });
+}
+
 /// Note fill color: in-scale notes stay blue, out-of-scale notes turn red so
 /// you can see at a glance when you've strayed from the key.
 fn note_color(scale: ScaleSettings, pitch: u8, ghost: bool) -> egui::Color32 {
@@ -647,10 +777,12 @@ fn beat_at_x(grid: egui::Rect, x: f32, beat_w: f32) -> f64 {
 }
 
 fn note_rect(grid: egui::Rect, note: &MidiNote, key_h: f32, beat_w: f32) -> Option<egui::Rect> {
-    if note.pitch < BASE_PITCH || note.pitch >= BASE_PITCH + KEYS as u8 {
+    let pitch = note.pitch as usize;
+    let base = BASE_PITCH as usize;
+    if pitch < base || pitch >= base + KEYS {
         return None;
     }
-    let row = (BASE_PITCH + KEYS as u8 - 1 - note.pitch) as f32;
+    let row = (base + KEYS - 1 - pitch) as f32;
     let x = grid.left() + note.start_beats as f32 * beat_w;
     let w = (note.length_beats as f32 * beat_w).max(4.0);
     let y = grid.top() + row * key_h + 1.0;
@@ -670,7 +802,26 @@ fn paint_note(
     selected: bool,
 ) {
     if let Some(nrect) = note_rect(*grid, note, key_h, beat_w) {
-        painter.rect_filled(nrect, 2.0, color);
+        // Dim quieter notes so velocity reads on the grid itself.
+        let t = (note.velocity as f32 / 127.0).clamp(0.15, 1.0);
+        let fill = egui::Color32::from_rgba_unmultiplied(
+            color.r(),
+            color.g(),
+            color.b(),
+            (55.0 + 200.0 * t) as u8,
+        );
+        painter.rect_filled(nrect, 2.0, fill);
+        // Velocity fill from the bottom of the note body.
+        let vel_h = (nrect.height() * t).max(2.0);
+        let vel_rect = egui::Rect::from_min_max(
+            egui::pos2(nrect.left(), nrect.bottom() - vel_h),
+            nrect.max,
+        );
+        painter.rect_filled(
+            vel_rect,
+            2.0,
+            egui::Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 255),
+        );
         if selected {
             painter.rect_stroke(
                 nrect,
@@ -693,6 +844,97 @@ fn paint_note(
             egui::Color32::from_rgba_unmultiplied(255, 255, 255, 40),
         );
     }
+}
+
+fn paint_velocity_lane(
+    painter: &egui::Painter,
+    lane: &egui::Rect,
+    notes: &[MidiNote],
+    ghosts: &[MidiNote],
+    selected: &[NoteId],
+    beat_w: f32,
+    clip_length: f64,
+) {
+    // Clip-end shade
+    let clip_end_x = lane.left() + clip_length as f32 * beat_w;
+    if clip_end_x < lane.right() {
+        painter.rect_filled(
+            egui::Rect::from_min_max(
+                egui::pos2(clip_end_x, lane.top()),
+                egui::pos2(lane.right(), lane.bottom()),
+            ),
+            0.0,
+            egui::Color32::from_rgba_unmultiplied(20, 24, 30, 90),
+        );
+    }
+
+    let drag_ids: Vec<NoteId> = ghosts.iter().map(|n| n.id).collect();
+    let drawn: Vec<&MidiNote> = notes
+        .iter()
+        .filter(|n| !drag_ids.contains(&n.id))
+        .chain(ghosts.iter())
+        .collect();
+
+    for note in drawn {
+        let Some(bar) = velocity_bar_rect(*lane, note, beat_w) else {
+            continue;
+        };
+        let sel = selected.contains(&note.id);
+        let color = if sel {
+            egui::Color32::from_rgb(255, 200, 90)
+        } else {
+            egui::Color32::from_rgb(100, 180, 255)
+        };
+        painter.rect_filled(bar, 1.0, color);
+        if sel {
+            painter.rect_stroke(
+                bar,
+                1.0,
+                egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 230, 120)),
+                egui::StrokeKind::Outside,
+            );
+        }
+    }
+}
+
+fn velocity_bar_rect(lane: egui::Rect, note: &MidiNote, beat_w: f32) -> Option<egui::Rect> {
+    let x = lane.left() + note.start_beats as f32 * beat_w;
+    let w = (note.length_beats as f32 * beat_w).max(4.0).min(beat_w * 0.9);
+    if x > lane.right() || x + w < lane.left() {
+        return None;
+    }
+    let t = (note.velocity as f32 / 127.0).clamp(0.0, 1.0);
+    let h = (lane.height() - 4.0) * t;
+    let y = lane.bottom() - 2.0 - h;
+    Some(egui::Rect::from_min_size(
+        egui::pos2(x, y),
+        egui::vec2(w.max(3.0), h.max(2.0)),
+    ))
+}
+
+fn velocity_at_y(lane: egui::Rect, y: f32) -> u8 {
+    let t = ((lane.bottom() - 2.0 - y) / (lane.height() - 4.0).max(1.0)).clamp(0.0, 1.0);
+    (t * 127.0).round().clamp(1.0, 127.0) as u8
+}
+
+fn hit_velocity_bar<'a>(
+    notes: &'a [MidiNote],
+    lane: &egui::Rect,
+    pos: egui::Pos2,
+    beat_w: f32,
+) -> Option<&'a MidiNote> {
+    notes.iter().rev().find(|n| {
+        velocity_bar_rect(*lane, n, beat_w)
+            .map(|r| {
+                // Widen hit target vertically across the lane for easier grabs.
+                let full = egui::Rect::from_min_max(
+                    egui::pos2(r.left(), lane.top()),
+                    egui::pos2(r.right(), lane.bottom()),
+                );
+                full.contains(pos)
+            })
+            .unwrap_or(false)
+    })
 }
 
 fn hit_note<'a>(
@@ -750,6 +992,7 @@ fn start_drag(
     beat_w: f32,
     ctrl: bool,
     shift: bool,
+    alt: bool,
 ) {
     if let Some(note) = hit_note(notes, grid, pos, key_h, beat_w) {
         if ctrl {
@@ -763,7 +1006,7 @@ fn start_drag(
             if app.ui.selected_notes.is_empty() {
                 app.ui.selected_notes_clip = None;
             }
-            app.preview_note(track_id, note.pitch);
+            app.preview_note_vel(track_id, note.pitch, note.velocity);
             return;
         }
 
@@ -777,7 +1020,15 @@ fn start_drag(
                 start_beats: note.start_beats,
                 length_beats: note.length_beats,
             });
-            app.preview_note(track_id, note.pitch);
+            app.preview_note_vel(track_id, note.pitch, note.velocity);
+            return;
+        }
+
+        if alt {
+            // Resolve beat-mates / selection before changing selection state.
+            let before = notes_for_velocity_edit(app, clip_id, notes, note);
+            sync_selection_to_notes(app, clip_id, &before);
+            begin_velocity_drag(app, clip_id, note, before, track_id);
             return;
         }
 
@@ -808,7 +1059,7 @@ fn start_drag(
             start_beats: note.start_beats,
             grab_offset_beats: beat - note.start_beats,
         });
-        app.preview_note(track_id, note.pitch);
+        app.preview_note_vel(track_id, note.pitch, note.velocity);
         return;
     }
 
@@ -827,19 +1078,150 @@ fn start_drag(
         return;
     };
     let beat = quantize_floor(beat_at_x(*grid, pos.x, beat_w).max(0.0));
+    let velocity = app.ui.draw_velocity.min(127).max(1);
     app.ui.piano_drag = Some(PianoNoteDrag::Draw {
         clip_id,
         pitch,
         origin_beat: beat,
         end_beat: beat + MIN_NOTE_LEN,
+        velocity,
         chord: app.ui.chord_stamp_enabled.then_some(app.ui.chord_kind),
     });
-    app.preview_note(track_id, pitch);
+    app.preview_note_vel(track_id, pitch, velocity);
+}
+
+fn start_velocity_drag(
+    app: &mut CottApp,
+    clip_id: cott_core::ids::ClipId,
+    notes: &[MidiNote],
+    grid: &egui::Rect,
+    lane: &egui::Rect,
+    pos: egui::Pos2,
+    track_id: cott_core::ids::TrackId,
+    beat_w: f32,
+    ctrl: bool,
+    shift: bool,
+) {
+    if shift {
+        // Lasso across the velocity lane uses note time spans.
+        app.ui.piano_drag = Some(PianoNoteDrag::SelectLasso {
+            clip_id,
+            origin: pos,
+            current: pos,
+        });
+        return;
+    }
+
+    let Some(note) = hit_velocity_bar(notes, lane, pos, beat_w).or_else(|| {
+        // Click empty lane under a note's time span.
+        let beat = beat_at_x(*grid, pos.x, beat_w);
+        notes
+            .iter()
+            .rev()
+            .find(|n| beat >= n.start_beats && beat < n.start_beats + n.length_beats)
+    }) else {
+        return;
+    };
+
+    if ctrl {
+        app.ui.selected_notes_clip = Some(clip_id);
+        if let Some(idx) = app.ui.selected_notes.iter().position(|id| *id == note.id) {
+            app.ui.selected_notes.remove(idx);
+        } else {
+            app.ui.selected_notes.push(note.id);
+        }
+        if app.ui.selected_notes.is_empty() {
+            app.ui.selected_notes_clip = None;
+        }
+        app.preview_note_vel(track_id, note.pitch, note.velocity);
+        return;
+    }
+
+    let before = notes_for_velocity_edit(app, clip_id, notes, note);
+    sync_selection_to_notes(app, clip_id, &before);
+
+    let velocity = velocity_at_y(*lane, pos.y);
+    begin_velocity_drag_at(app, clip_id, note, before, track_id, velocity);
+}
+
+/// Which notes a velocity edit should affect.
+///
+/// - No selection → every note that starts on the same beat as `clicked`
+/// - `clicked` is selected → the whole selection
+/// - `clicked` is not selected → just that note (individual selection)
+fn notes_for_velocity_edit(
+    app: &CottApp,
+    clip_id: cott_core::ids::ClipId,
+    notes: &[MidiNote],
+    clicked: &MidiNote,
+) -> Vec<MidiNote> {
+    let selection_active =
+        app.ui.selected_notes_clip == Some(clip_id) && !app.ui.selected_notes.is_empty();
+    if !selection_active {
+        notes_on_same_beat(notes, clicked.start_beats)
+    } else if app.ui.selected_notes.contains(&clicked.id) {
+        notes
+            .iter()
+            .filter(|n| app.ui.selected_notes.contains(&n.id))
+            .cloned()
+            .collect()
+    } else {
+        vec![clicked.clone()]
+    }
+}
+
+fn notes_on_same_beat(notes: &[MidiNote], start_beats: f64) -> Vec<MidiNote> {
+    notes
+        .iter()
+        .filter(|n| (n.start_beats - start_beats).abs() < 1e-9)
+        .cloned()
+        .collect()
+}
+
+fn sync_selection_to_notes(
+    app: &mut CottApp,
+    clip_id: cott_core::ids::ClipId,
+    notes: &[MidiNote],
+) {
+    app.ui.selected_notes = notes.iter().map(|n| n.id).collect();
+    app.ui.selected_notes_clip = if app.ui.selected_notes.is_empty() {
+        None
+    } else {
+        Some(clip_id)
+    };
+}
+
+fn begin_velocity_drag(
+    app: &mut CottApp,
+    clip_id: cott_core::ids::ClipId,
+    note: &MidiNote,
+    before: Vec<MidiNote>,
+    track_id: cott_core::ids::TrackId,
+) {
+    begin_velocity_drag_at(app, clip_id, note, before, track_id, note.velocity);
+}
+
+fn begin_velocity_drag_at(
+    app: &mut CottApp,
+    clip_id: cott_core::ids::ClipId,
+    note: &MidiNote,
+    before: Vec<MidiNote>,
+    track_id: cott_core::ids::TrackId,
+    velocity: u8,
+) {
+    app.ui.piano_drag = Some(PianoNoteDrag::Velocity {
+        clip_id,
+        note_id: note.id,
+        before,
+        velocity,
+    });
+    app.preview_note_vel(track_id, note.pitch, velocity);
 }
 
 fn update_drag(
     app: &mut CottApp,
     grid: &egui::Rect,
+    vel_lane: &egui::Rect,
     pos: egui::Pos2,
     track_id: cott_core::ids::TrackId,
     clip_length: f64,
@@ -850,13 +1232,17 @@ fn update_drag(
         return;
     };
     let mut preview_pitch: Option<u8> = None;
+    let mut preview_vel: Option<(u8, u8)> = None;
+    let mut draw_preview_vel: Option<u8> = None;
     match drag {
         PianoNoteDrag::Draw {
             pitch,
             origin_beat,
             end_beat,
+            velocity,
             ..
         } => {
+            draw_preview_vel = Some(*velocity);
             if let Some(p) = pitch_at_y(*grid, pos.y, key_h) {
                 if *pitch != p {
                     *pitch = p;
@@ -912,12 +1298,43 @@ fn update_drag(
             let end = quantize_round(beat).max(*start_beats + MIN_NOTE_LEN);
             *length_beats = (end - *start_beats).max(MIN_NOTE_LEN);
         }
+        PianoNoteDrag::Velocity {
+            note_id,
+            before,
+            velocity,
+            ..
+        } => {
+            let Some(grabbed) = before.iter().find(|n| n.id == *note_id) else {
+                return;
+            };
+            let new_vel = if vel_lane.y_range().contains(pos.y) {
+                velocity_at_y(*vel_lane, pos.y)
+            } else if grid.contains(pos) {
+                // Alt+drag on the note grid: map vertical position within the key row.
+                let Some(nrect) = note_rect(*grid, grabbed, key_h, beat_w) else {
+                    return;
+                };
+                let t = ((nrect.bottom() - pos.y) / nrect.height().max(1.0)).clamp(0.0, 1.0);
+                (t * 127.0).round().clamp(1.0, 127.0) as u8
+            } else {
+                velocity_at_y(*vel_lane, pos.y.clamp(vel_lane.top(), vel_lane.bottom()))
+            };
+            if *velocity != new_vel {
+                preview_vel = Some((grabbed.pitch, new_vel));
+            }
+            *velocity = new_vel;
+        }
         PianoNoteDrag::SelectLasso { current, .. } => {
             *current = pos;
         }
     }
-    if let Some(p) = preview_pitch {
-        app.preview_note_if_new_pitch(track_id, p);
+    if let Some((pitch, vel)) = preview_vel {
+        app.preview_note_vel(track_id, pitch, vel);
+    } else if let Some(p) = preview_pitch {
+        let vel = draw_preview_vel.unwrap_or(app.ui.draw_velocity);
+        if app.ui.piano_preview_pitch != Some(p) {
+            app.preview_note_vel(track_id, p, vel);
+        }
     }
 }
 
@@ -927,12 +1344,14 @@ fn drag_ghosts(drag: &Option<PianoNoteDrag>) -> Vec<MidiNote> {
             pitch,
             origin_beat,
             end_beat,
+            velocity,
             chord,
             ..
         }) => {
             let start = origin_beat.min(*end_beat);
             let end = origin_beat.max(*end_beat);
             let len = (end - start).max(MIN_NOTE_LEN);
+            let velocity = *velocity;
             chord
                 .map(|kind| chord_pitches(*pitch, kind))
                 .unwrap_or_else(|| vec![*pitch])
@@ -940,7 +1359,7 @@ fn drag_ghosts(drag: &Option<PianoNoteDrag>) -> Vec<MidiNote> {
                 .map(|pitch| MidiNote {
                     id: NoteId::new(),
                     pitch,
-                    velocity: 100,
+                    velocity,
                     start_beats: start,
                     length_beats: len,
                     channel: 0,
@@ -974,6 +1393,18 @@ fn drag_ghosts(drag: &Option<PianoNoteDrag>) -> Vec<MidiNote> {
             length_beats: *length_beats,
             channel: before.channel,
         }],
+        Some(PianoNoteDrag::Velocity {
+            note_id,
+            before,
+            velocity,
+            ..
+        }) => {
+            let Some(grabbed) = before.iter().find(|n| n.id == *note_id) else {
+                return Vec::new();
+            };
+            let delta = *velocity as i16 - grabbed.velocity as i16;
+            notes_after_velocity(before, delta)
+        }
         Some(PianoNoteDrag::SelectLasso { .. }) | None => Vec::new(),
     }
 }
@@ -1020,6 +1451,20 @@ fn notes_after_move(before: &[MidiNote], pitch_delta: i16, start_delta: f64) -> 
         .collect()
 }
 
+fn notes_after_velocity(before: &[MidiNote], velocity_delta: i16) -> Vec<MidiNote> {
+    before
+        .iter()
+        .map(|note| MidiNote {
+            id: note.id,
+            pitch: note.pitch,
+            velocity: (note.velocity as i16 + velocity_delta).clamp(1, 127) as u8,
+            start_beats: note.start_beats,
+            length_beats: note.length_beats,
+            channel: note.channel,
+        })
+        .collect()
+}
+
 /// Build a chord by stacking intervals above the clicked root pitch.
 fn chord_pitches(root: u8, kind: ChordKind) -> Vec<u8> {
     kind.intervals()
@@ -1038,8 +1483,11 @@ fn commit_drag(app: &mut CottApp, notes: &[MidiNote], grid: &egui::Rect, key_h: 
             pitch,
             origin_beat,
             end_beat,
+            velocity,
             chord,
         } => {
+            // Keep draw velocity in sync (already set when the drag started).
+            app.ui.draw_velocity = velocity;
             let start = origin_beat.min(end_beat);
             let end = origin_beat.max(end_beat);
             let len = (end - start).max(MIN_NOTE_LEN);
@@ -1097,6 +1545,27 @@ fn commit_drag(app: &mut CottApp, notes: &[MidiNote], grid: &egui::Rect, key_h: 
                 channel: before.channel,
             };
             app.edit_note(clip_id, before, after);
+        }
+        PianoNoteDrag::Velocity {
+            clip_id,
+            note_id,
+            before,
+            velocity,
+            ..
+        } => {
+            let Some(grabbed) = before.iter().find(|n| n.id == note_id).cloned() else {
+                return;
+            };
+            let delta = velocity as i16 - grabbed.velocity as i16;
+            let after = notes_after_velocity(&before, delta);
+            app.ui.draw_velocity = velocity.min(127).max(1);
+            if after.len() == 1 {
+                if let (Some(b), Some(a)) = (before.into_iter().next(), after.into_iter().next()) {
+                    app.edit_note(clip_id, b, a);
+                }
+            } else {
+                app.edit_notes(clip_id, before, after);
+            }
         }
         PianoNoteDrag::SelectLasso {
             clip_id,
@@ -1182,5 +1651,58 @@ mod tests {
         let delta = target - anchor;
         assert!((notes[0].start_beats + delta - 4.0).abs() < 1e-9);
         assert!((notes[1].start_beats + delta - 4.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn note_paste_preserves_velocity() {
+        let notes = [
+            MidiNote::new(60, 42, 1.0, 0.5),
+            MidiNote::new(64, 110, 1.5, 0.5),
+        ];
+        let anchor = notes
+            .iter()
+            .map(|n| n.start_beats)
+            .fold(f64::INFINITY, f64::min);
+        let delta = 4.0 - anchor;
+        let pasted: Vec<MidiNote> = notes
+            .iter()
+            .map(|note| MidiNote {
+                id: NoteId::new(),
+                pitch: note.pitch,
+                velocity: note.velocity,
+                start_beats: (note.start_beats + delta).max(0.0),
+                length_beats: note.length_beats,
+                channel: note.channel,
+            })
+            .collect();
+        assert_eq!(pasted[0].velocity, 42);
+        assert_eq!(pasted[1].velocity, 110);
+        assert_eq!(pasted[0].pitch, 60);
+        assert_eq!(pasted[1].pitch, 64);
+    }
+
+    #[test]
+    fn velocity_empty_selection_groups_notes_on_same_beat() {
+        let notes = [
+            MidiNote::new(60, 100, 1.0, 0.5),
+            MidiNote::new(64, 90, 1.0, 0.5),
+            MidiNote::new(67, 80, 1.0, 0.5),
+            MidiNote::new(72, 100, 2.0, 0.5),
+        ];
+        let group = notes_on_same_beat(&notes, 1.0);
+        assert_eq!(group.len(), 3);
+        assert!(group.iter().all(|n| (n.start_beats - 1.0).abs() < 1e-9));
+        assert!(!group.iter().any(|n| n.pitch == 72));
+    }
+
+    #[test]
+    fn velocity_delta_keeps_relative_levels() {
+        let before = [
+            MidiNote::new(60, 100, 1.0, 0.5),
+            MidiNote::new(64, 80, 1.0, 0.5),
+        ];
+        let after = notes_after_velocity(&before, -20);
+        assert_eq!(after[0].velocity, 80);
+        assert_eq!(after[1].velocity, 60);
     }
 }

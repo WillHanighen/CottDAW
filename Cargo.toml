@@ -5,6 +5,9 @@ members = [
     "crates/cott-ipc",
     "crates/cott-daw",
     "crates/cott-vst-worker",
+    "crates/cott-synth-dsp",
+    "crates/cott-synth",
+    "crates/cott-xtask",
 ]
 default-members = ["crates/cott-daw"]
 
@@ -17,6 +20,7 @@ authors = ["Cottage End"]
 [workspace.dependencies]
 cott-core = { path = "crates/cott-core" }
 cott-ipc = { path = "crates/cott-ipc" }
+cott-synth-dsp = { path = "crates/cott-synth-dsp" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -30,6 +34,8 @@ petgraph = "0.7"
 rtrb = "0.3"
 midly = "0.5"
 symphonia = { version = "0.5", features = ["mp3", "flac", "wav", "ogg", "aac", "isomp4"] }
+# Symphonia 0.5 has no native Opus decoder; 0.2.x matches symphonia 0.5.
+symphonia-adapter-libopus = "0.2"
 rubato = "0.16"
 cpal = { version = "0.18", features = ["pipewire"] }
 eframe = { version = "0.31", default-features = false, features = ["default_fonts", "glow", "x11"] }

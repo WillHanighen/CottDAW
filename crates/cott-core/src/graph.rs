@@ -1,6 +1,7 @@
 //! Typed acyclic audio/MIDI routing graph.
 
 use crate::ids::{EdgeId, NodeId, PluginInstanceId, PortId, TrackId};
+use cott_synth_dsp::SynthParams;
 use indexmap::IndexMap;
 use petgraph::algo::{is_cyclic_directed, toposort};
 use petgraph::graph::{DiGraph, NodeIndex};
@@ -81,6 +82,11 @@ pub enum NodeKind {
     },
     SumMixer,
     MasterOutput,
+    /// First-party CottSynth (same DSP as the redistributable VST3).
+    BuiltinSynth {
+        #[serde(default)]
+        params: SynthParams,
+    },
     #[serde(alias = "Vst3Instrument")]
     PluginInstrument {
         instance_id: PluginInstanceId,
@@ -179,6 +185,20 @@ impl GraphNode {
             inputs: vec![Port::audio_in("L", 0), Port::audio_in("R", 1)],
             outputs: vec![Port::audio_out("L", 0), Port::audio_out("R", 1)],
             position: [400.0, 100.0],
+            latency_samples: 0,
+        }
+    }
+
+    pub fn builtin_synth(name: impl Into<String>) -> Self {
+        Self {
+            id: NodeId::new(),
+            name: name.into(),
+            kind: NodeKind::BuiltinSynth {
+                params: SynthParams::default(),
+            },
+            inputs: vec![Port::midi_in("MIDI")],
+            outputs: vec![Port::audio_out("L", 0), Port::audio_out("R", 1)],
+            position: [200.0, 0.0],
             latency_samples: 0,
         }
     }

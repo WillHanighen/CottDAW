@@ -163,6 +163,40 @@ impl Project {
         id
     }
 
+    /// Attach the in-process CottSynth fallback (used when the VST3 bundle is missing).
+    pub fn attach_builtin_synth(&mut self, track_id: TrackId) -> Option<NodeId> {
+        let track = self.tracks.iter().find(|t| t.id == track_id)?;
+        if track.kind != TrackKind::Midi {
+            return None;
+        }
+        let midi_src = track.midi_source_node?;
+        let gain = track.gain_node?;
+        let y = self
+            .graph
+            .nodes
+            .get(&gain)
+            .map(|n| n.position[1])
+            .unwrap_or(0.0);
+
+        if let Some(old_id) = track.instrument_node {
+            let _ = self.graph.remove_node(old_id);
+        }
+
+        let mut synth = GraphNode::builtin_synth("CottSynth");
+        synth.position = [200.0, y];
+        let synth_id = synth.id;
+        self.graph.edges.retain(|_, e| e.from_node != midi_src);
+        self.graph.add_node(synth);
+        let _ = self.graph.connect_midi(midi_src, synth_id);
+        let _ = self.graph.connect_stereo(synth_id, gain);
+
+        if let Some(t) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+            t.instrument_node = Some(synth_id);
+        }
+        self.touch();
+        Some(synth_id)
+    }
+
     pub fn add_audio_track(&mut self, name: impl Into<String>) -> TrackId {
         let name = name.into();
         let mut track = Track::new_audio(&name);
@@ -188,6 +222,50 @@ impl Project {
         self.tracks.push(track);
         self.touch();
         id
+    }
+
+    /// Rename a track and keep its routing source/gain node labels in sync.
+    /// Instrument nodes keep their plugin names.
+    pub fn rename_track(&mut self, track_id: TrackId, name: impl Into<String>) -> bool {
+        let name = name.into();
+        let name = name.trim();
+        if name.is_empty() {
+            return false;
+        }
+
+        let (midi_src, audio_src, gain) = {
+            let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) else {
+                return false;
+            };
+            if track.name == name {
+                return false;
+            }
+            track.name = name.to_string();
+            (
+                track.midi_source_node,
+                track.audio_source_node,
+                track.gain_node,
+            )
+        };
+
+        if let Some(id) = midi_src {
+            if let Some(node) = self.graph.nodes.get_mut(&id) {
+                node.name = format!("{name} MIDI");
+            }
+        }
+        if let Some(id) = audio_src {
+            if let Some(node) = self.graph.nodes.get_mut(&id) {
+                node.name = format!("{name} Audio");
+            }
+        }
+        if let Some(id) = gain {
+            if let Some(node) = self.graph.nodes.get_mut(&id) {
+                node.name = format!("{name} Gain");
+            }
+        }
+
+        self.touch();
+        true
     }
 
     pub fn attach_plugin_instrument(
@@ -490,6 +568,55 @@ mod tests {
         assert_eq!(loaded.tracks.len(), 2);
         assert_eq!(loaded.meta.name, "Test");
         assert!(!loaded.graph.nodes.is_empty());
+    }
+
+    #[test]
+    fn rename_track_updates_routing_node_names() {
+        let mut project = Project::new("Rename");
+        let midi = project.add_midi_track("MIDI 1");
+        let audio = project.add_audio_track("Audio 1");
+
+        assert!(project.rename_track(midi, "Bass"));
+        assert!(project.rename_track(audio, "Drums"));
+
+        let midi_track = project.tracks.iter().find(|t| t.id == midi).unwrap();
+        let audio_track = project.tracks.iter().find(|t| t.id == audio).unwrap();
+        assert_eq!(midi_track.name, "Bass");
+        assert_eq!(audio_track.name, "Drums");
+
+        let midi_name = project
+            .graph
+            .nodes
+            .get(&midi_track.midi_source_node.unwrap())
+            .unwrap()
+            .name
+            .as_str();
+        let midi_gain = project
+            .graph
+            .nodes
+            .get(&midi_track.gain_node.unwrap())
+            .unwrap()
+            .name
+            .as_str();
+        let audio_name = project
+            .graph
+            .nodes
+            .get(&audio_track.audio_source_node.unwrap())
+            .unwrap()
+            .name
+            .as_str();
+        let audio_gain = project
+            .graph
+            .nodes
+            .get(&audio_track.gain_node.unwrap())
+            .unwrap()
+            .name
+            .as_str();
+
+        assert_eq!(midi_name, "Bass MIDI");
+        assert_eq!(midi_gain, "Bass Gain");
+        assert_eq!(audio_name, "Drums Audio");
+        assert_eq!(audio_gain, "Drums Gain");
     }
 
     #[test]

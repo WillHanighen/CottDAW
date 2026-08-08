@@ -302,15 +302,27 @@ impl Vst2Plugin {
         if let Some(mut editor) = self.editor.take() {
             editor.close();
         }
+        if let Some(win) = self.owned_editor.as_mut() {
+            let gone =
+                win.wait_for_embed_children_gone(std::time::Duration::from_millis(250));
+            win.sync();
+            if !gone {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        }
         self.owned_editor = None;
     }
 
     pub fn pump_editor(&mut self) -> bool {
-        if let Some(window) = self.owned_editor.as_mut()
-            && !window.pump_events()
-        {
-            self.close_editor();
-            return false;
+        if let Some(window) = self.owned_editor.as_mut() {
+            let result = window.pump_events();
+            if result.closed {
+                self.close_editor();
+                return false;
+            }
+            // Embed child is already synced in FloatingEditorWindow; VST2
+            // editors rarely expose a host-driven resize API.
+            let _ = result.resized_to;
         }
         if let Some(editor) = self.editor.as_mut() {
             editor.idle();

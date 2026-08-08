@@ -50,6 +50,19 @@ impl RackPlugin {
         }
     }
 
+    fn flush_pending_params(&mut self) {
+        if let Self::Vst3(plugin) = self {
+            plugin.flush_pending_params();
+        }
+    }
+
+    fn take_view_resize_request(&mut self) -> Option<(u32, u32)> {
+        match self {
+            Self::Vst3(plugin) => plugin.take_view_resize_request(),
+            Self::Clap(_) | Self::Lv2(_) => None,
+        }
+    }
+
     fn latency_samples(&self) -> u32 {
         match self {
             Self::Vst3(plugin) => plugin.latency_samples(),
@@ -656,7 +669,8 @@ impl VstPlugin {
         let is_instrument = matches!(info.category, PluginCategory::Instrument)
             || info.accepts_midi
             || crate::classify::name_looks_like_instrument(&info.name);
-        let has_editor = info.has_editor;
+        // Scan-time `info.has_editor` is often false; use the loaded plugin's flag.
+        let has_editor = plugin.plugin().info().has_editor;
         info!(
             "loaded {format} {name} instrument={is_instrument} editor={has_editor} latency={latency}"
         );
@@ -716,7 +730,7 @@ impl VstPlugin {
     }
 
     pub fn open_editor(&mut self, parent_x11: Option<u64>) -> Result<()> {
-        // Close any previous owned floating window first.
+        // Tear down any previous editor + parent fully before recreating.
         self.close_editor();
 
         let (parent_id, owned) = match parent_x11 {
@@ -726,6 +740,7 @@ impl VstPlugin {
                     plugin = %self.name,
                     "no host X11 parent — creating floating editor window"
                 );
+                // Map + XSync inside create so the embed exists before GL attach.
                 let win = FloatingEditorWindow::create_default(&self.name)
                     .context("create floating X11 editor parent")?;
                 let id = win.embed_window_id();
@@ -748,18 +763,56 @@ impl VstPlugin {
 
         if let Some(mut win) = owned {
             if let Some((w, h)) = preferred_size {
+                // Keep shell matched to the plugin's reported size. Do this
+                // before storing so the first paint sees a stable geometry.
                 win.resize(w, h);
+                win.sync();
             }
+            win.raise_embed();
             self.owned_editor = Some(win);
         }
 
-        info!(plugin = %self.name, parent_id, "plugin editor opened");
+        // Give IRunLoop / baseview a couple of ticks so the first frames paint.
+        for _ in 0..4 {
+            self.plugin.pump_host_services();
+            if let Some(editor) = self.plugin.plugin_mut().editor() {
+                editor.on_idle();
+            }
+            if let Some(win) = self.owned_editor.as_mut() {
+                let _ = win.pump_events();
+            }
+        }
+
+        let child_count = self
+            .owned_editor
+            .as_ref()
+            .map(|w| w.embed_child_count())
+            .unwrap_or(0);
+        info!(
+            plugin = %self.name,
+            parent_id,
+            child_count,
+            "plugin editor opened"
+        );
         Ok(())
     }
 
     pub fn close_editor(&mut self) {
+        // Drop the plugin view (GL) while the X11 parent still exists.
+        // baseview's WindowHandle::close() is asynchronous (atomic flag only);
+        // wait for its child window to vanish before destroying the parent.
         if let Some(editor) = self.plugin.plugin_mut().editor() {
             editor.close();
+        }
+        if let Some(win) = self.owned_editor.as_mut() {
+            self.plugin.pump_host_services();
+            let gone =
+                win.wait_for_embed_children_gone(std::time::Duration::from_millis(250));
+            win.sync();
+            if !gone {
+                // Last resort: give the GL thread a beat before XID reuse.
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
         }
         self.owned_editor = None;
     }
@@ -770,24 +823,41 @@ impl VstPlugin {
         // Linux VST3 UI timers / FD handlers.
         self.plugin.pump_host_services();
 
-        let closed = match self.owned_editor.as_mut() {
-            Some(win) => !win.pump_events(),
+        let resized_to = match self.owned_editor.as_mut() {
+            Some(win) => {
+                let result = win.pump_events();
+                if result.closed {
+                    // Same teardown order as close_editor: GL first, wait, then parent.
+                    self.close_editor();
+                    return false;
+                }
+                result.resized_to
+            }
             None => {
                 // Even without our floating window, keep the run-loop alive
                 // so plugins that opened elsewhere still get timers.
+                self.plugin.flush_pending_params();
                 return true;
             }
         };
-        if closed {
-            if let Some(editor) = self.plugin.plugin_mut().editor() {
-                editor.close();
-            }
-            self.owned_editor = None;
-            return false;
+
+        // Plugin-driven resize (IPlugFrame::resizeView) — onSize already ran;
+        // just grow the floating X11 shell/embed to match.
+        if let Some((w, h)) = self.plugin.take_view_resize_request()
+            && let Some(win) = self.owned_editor.as_mut()
+        {
+            win.resize(w, h);
+        } else if let Some((w, h)) = resized_to {
+            // WM resize: nih-plug rejects host→plugin onSize when sizes differ,
+            // so we keep a dark shell background and rely on in-UI scrolling.
+            let _ = (w, h);
         }
+
         if let Some(editor) = self.plugin.plugin_mut().editor() {
             editor.on_idle();
         }
+        // Echo GUI performEdit → processor (nih-plug needs this while audio runs).
+        self.plugin.flush_pending_params();
         true
     }
 

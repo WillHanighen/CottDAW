@@ -56,7 +56,7 @@ use vst3::Steinberg::{
 };
 use vst3::{Class, ComPtr, ComWrapper};
 
-use host::{HostServices, PendingParams};
+use host::{HostServices, PendingParams, PendingViewResize};
 
 /// Format identifier used on returned [`PluginInfo`].
 pub const FORMAT: &str = "vst3";
@@ -600,6 +600,10 @@ pub struct Vst3Plugin {
     host_services: HostServices,
     /// Keep-alive for `IComponentHandler` installed on the controller.
     _component_handler: ComPtr<vst3::Steinberg::Vst::IComponentHandler>,
+    /// Keep-alive for `IPlugFrame` installed on the open editor view.
+    _plug_frame: Option<ComPtr<vst3::Steinberg::IPlugFrame>>,
+    /// Plugin-requested editor size from `IPlugFrame::resizeView`.
+    pending_view_resize: PendingViewResize,
     /// GUI / host param edits waiting for the next `process()` call.
     pending_params: PendingParams,
 }
@@ -610,9 +614,74 @@ impl Vst3Plugin {
         self.host_services.pump();
     }
 
+    /// Push queued GUI `performEdit` changes into the processor immediately.
+    ///
+    /// nih-plug (and the VST3 model) does not apply GUI writes locally while
+    /// `setProcessing(true)` — it waits for the host to echo them via
+    /// `process()` `inputParameterChanges`. Waiting only on the audio IPC
+    /// path leaves editors fighting `param.value()` and snapping to defaults.
+    /// A zero-sample process is the standard VST3 parameter flush.
+    pub fn flush_pending_params(&mut self) {
+        if !self.is_active() || !self.processing {
+            return;
+        }
+        let pending = self.pending_params.take();
+        if pending.is_empty() {
+            return;
+        }
+
+        // Input and output event lists MUST be distinct — sharing one
+        // RefCell-backed list can panic / corrupt when the plugin touches both.
+        let input_events = ComWrapper::new(EventList3::default());
+        let output_events = ComWrapper::new(EventList3::default());
+        let (Some(input_events_ptr), Some(output_events_ptr)) = (
+            input_events.to_com_ptr::<IEventList>(),
+            output_events.to_com_ptr::<IEventList>(),
+        ) else {
+            for (id, value) in pending {
+                self.pending_params.push(id, value);
+            }
+            return;
+        };
+        let (_in_keep, input_params, _out_keep, output_params) =
+            host::make_process_param_changes(pending);
+
+        let mut data = ProcessData {
+            #[allow(clippy::cast_possible_wrap)]
+            processMode: ProcessModes_::kRealtime as i32,
+            #[allow(clippy::cast_possible_wrap)]
+            symbolicSampleSize: SymbolicSampleSizes_::kSample32 as i32,
+            numSamples: 0,
+            numInputs: 0,
+            numOutputs: 0,
+            inputs: ptr::null_mut(),
+            outputs: ptr::null_mut(),
+            inputParameterChanges: input_params.as_ptr(),
+            outputParameterChanges: output_params.as_ptr(),
+            inputEvents: input_events_ptr.as_ptr(),
+            outputEvents: output_events_ptr.as_ptr(),
+            processContext: ptr::null_mut(),
+        };
+
+        let processor_ptr = self.processor.as_ptr();
+        let _ = run_audio_block_with::<Vst3Plugin, i32>(FORMAT, -1, || unsafe {
+            ((*(*processor_ptr).vtbl).process)(processor_ptr, &raw mut data)
+        });
+        // Skip apply_output_param_changes here: while processing, nih-plug's
+        // setParamNormalized is a no-op, and flushing meters isn't needed.
+        let _ = output_params;
+    }
+
     /// Reported processing latency in samples (`IAudioProcessor::getLatencySamples`).
     pub fn latency_samples(&self) -> u32 {
         unsafe { self.processor.getLatencySamples() }
+    }
+
+    /// Take a plugin-driven editor resize request (`IPlugFrame::resizeView`).
+    /// The host should resize its platform window to match; `onSize` was already
+    /// acknowledged inside `resizeView`.
+    pub fn take_view_resize_request(&self) -> Option<(u32, u32)> {
+        self.pending_view_resize.take()
     }
 
     fn load_from(info: &PluginInfo) -> Result<Self> {
@@ -717,11 +786,12 @@ impl Vst3Plugin {
         let param_count = param_count_raw as usize;
 
         let mut info = info.clone();
-        // The editor exists if `createView("editor")` returns a
-        // non-null view. We probe by creating + releasing it once
-        // at load time. (Some plugins are slow to create the view;
-        // a heavier-weight host would defer this to first open.)
-        info.has_editor = unsafe { create_editor_view(&controller) }.is_some();
+        // Do NOT probe with createView+release at load time. nih-plug (and
+        // some other plugins) only tolerate one editor lifecycle; creating a
+        // throwaway view here leaves GUI parameter edits unable to stick
+        // while audio is running (performEdit never round-trips cleanly).
+        // Assume an editor exists and let open() fail if createView is null.
+        info.has_editor = true;
 
         Ok(Self {
             info,
@@ -740,6 +810,8 @@ impl Vst3Plugin {
             editor_open: false,
             host_services,
             _component_handler: component_handler,
+            _plug_frame: None,
+            pending_view_resize: PendingViewResize::default(),
             pending_params,
         })
     }
@@ -1033,7 +1105,17 @@ impl truce_rack_core::editor::PluginEditor for Vst3Plugin {
                 "IPlugView::isPlatformTypeSupported returned false".into(),
             ));
         }
+        // Steinberg order: setFrame before attached. On Linux the frame must
+        // also expose IRunLoop (nih-plug casts to it during setFrame).
+        let (pending_resize, frame) = host::create_plug_frame(self.host_services.run_loop());
+        self.pending_view_resize = pending_resize;
+        if unsafe { view.setFrame(frame.as_ptr()) } != kResultOk {
+            return Err(Error::Other("IPlugView::setFrame failed".into()));
+        }
+        self._plug_frame = Some(frame);
         if unsafe { view.attached(parent_ptr, type_str) } != kResultOk {
+            let _ = unsafe { view.setFrame(ptr::null_mut()) };
+            self._plug_frame = None;
             return Err(Error::Other("IPlugView::attached returned non-OK".into()));
         }
         self.view = Some(view);
@@ -1042,9 +1124,13 @@ impl truce_rack_core::editor::PluginEditor for Vst3Plugin {
     }
 
     fn close(&mut self) {
+        // removed() first so the plugin tears down GL against a live parent,
+        // then clear the frame / drop the view.
         if let Some(view) = self.view.take() {
             unsafe { view.removed() };
+            let _ = unsafe { view.setFrame(ptr::null_mut()) };
         }
+        self._plug_frame = None;
         self.editor_open = false;
     }
 
