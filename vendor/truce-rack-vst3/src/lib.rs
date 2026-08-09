@@ -51,8 +51,9 @@ use vst3::Steinberg::Vst::{
 };
 use vst3::Steinberg::{
     IBStream, IBStreamTrait, IPlugView, IPlugViewTrait, IPluginBaseTrait, IPluginFactory,
-    IPluginFactoryTrait, PClassInfo, PClassInfo_, TUID, ViewRect, kPlatformTypeHWND,
-    kPlatformTypeNSView, kPlatformTypeX11EmbedWindowID, kResultOk, kResultTrue,
+    IPluginFactory3, IPluginFactory3Trait, IPluginFactoryTrait, PClassInfo, PClassInfo_, TUID,
+    ViewRect, kPlatformTypeHWND, kPlatformTypeNSView, kPlatformTypeX11EmbedWindowID, kResultOk,
+    kResultTrue,
 };
 use vst3::{Class, ComPtr, ComWrapper};
 
@@ -576,8 +577,6 @@ pub struct Vst3Plugin {
     layouts: Vec<BusLayout>,
     active_layout: Option<BusLayout>,
 
-    // Hold the module open for the lifetime of the instance.
-    _module: LoadedModule,
     component: ComPtr<IComponent>,
     processor: ComPtr<IAudioProcessor>,
     controller: ComPtr<IEditController>,
@@ -606,6 +605,10 @@ pub struct Vst3Plugin {
     pending_view_resize: PendingViewResize,
     /// GUI / host param edits waiting for the next `process()` call.
     pending_params: PendingParams,
+
+    // MUST be last: Rust drops fields in declaration order. Unloading the
+    // .so before COM `release`/`terminate` SEGV's (LSP and many other plugs).
+    _module: LoadedModule,
 }
 
 impl Vst3Plugin {
@@ -620,7 +623,10 @@ impl Vst3Plugin {
     /// `setProcessing(true)` — it waits for the host to echo them via
     /// `process()` `inputParameterChanges`. Waiting only on the audio IPC
     /// path leaves editors fighting `param.value()` and snapping to defaults.
-    /// A zero-sample process is the standard VST3 parameter flush.
+    ///
+    /// Uses a zero-sample `process()` with *valid* silent stereo buses.
+    /// Passing null `inputs`/`outputs` (even with `numSamples == 0`) SEGVs
+    /// JUCE plugs such as Firefly Synth 2.
     pub fn flush_pending_params(&mut self) {
         if !self.is_active() || !self.processing {
             return;
@@ -646,16 +652,58 @@ impl Vst3Plugin {
         let (_in_keep, input_params, _out_keep, output_params) =
             host::make_process_param_changes(pending);
 
+        let in_buses = unsafe {
+            self.component
+                .getBusCount(MediaTypes_::kAudio as i32, BusDirections_::kInput as i32)
+        };
+        let out_buses = unsafe {
+            self.component
+                .getBusCount(MediaTypes_::kAudio as i32, BusDirections_::kOutput as i32)
+        };
+
+        // Dummy sample storage — plugins must not read/write when
+        // numSamples==0, but many still load channelBuffers32[i].
+        let mut in_l = 0.0f32;
+        let mut in_r = 0.0f32;
+        let mut out_l = 0.0f32;
+        let mut out_r = 0.0f32;
+        let mut input_ptrs = [ptr::from_mut(&mut in_l), ptr::from_mut(&mut in_r)];
+        let mut output_ptrs = [ptr::from_mut(&mut out_l), ptr::from_mut(&mut out_r)];
+        let mut input_bus = AudioBusBuffers {
+            numChannels: 2,
+            silenceFlags: u64::MAX,
+            __field0: AudioBusBuffers__type0 {
+                channelBuffers32: input_ptrs.as_mut_ptr(),
+            },
+        };
+        let mut output_bus = AudioBusBuffers {
+            numChannels: 2,
+            silenceFlags: u64::MAX,
+            __field0: AudioBusBuffers__type0 {
+                channelBuffers32: output_ptrs.as_mut_ptr(),
+            },
+        };
+
+        let num_inputs = i32::from(in_buses > 0);
+        let num_outputs = i32::from(out_buses > 0);
         let mut data = ProcessData {
             #[allow(clippy::cast_possible_wrap)]
             processMode: ProcessModes_::kRealtime as i32,
             #[allow(clippy::cast_possible_wrap)]
             symbolicSampleSize: SymbolicSampleSizes_::kSample32 as i32,
             numSamples: 0,
-            numInputs: 0,
-            numOutputs: 0,
-            inputs: ptr::null_mut(),
-            outputs: ptr::null_mut(),
+            numInputs: num_inputs,
+            numOutputs: num_outputs,
+            inputs: if num_inputs > 0 {
+                &raw mut input_bus
+            } else {
+                ptr::null_mut()
+            },
+            outputs: if num_outputs > 0 {
+                &raw mut output_bus
+            } else {
+                ptr::null_mut()
+            },
             inputParameterChanges: input_params.as_ptr(),
             outputParameterChanges: output_params.as_ptr(),
             inputEvents: input_events_ptr.as_ptr(),
@@ -684,11 +732,48 @@ impl Vst3Plugin {
         self.pending_view_resize.take()
     }
 
+    /// Create the editor view (if needed) and return `getSize` *without*
+    /// attaching. Hosts should size the X11 parent to this before
+    /// [`PluginEditor::open`] — OpenGL editors (Surge XT) often stay black if
+    /// first attached into a wrong-sized window.
+    ///
+    /// The view is retained on `self` and reused by `open()` — do **not**
+    /// create a throwaway `IPlugView` for sizing (breaks JUCE single-editor).
+    pub fn prepare_editor_view(&mut self) -> Option<(u32, u32)> {
+        if self.view.is_none() {
+            self.view = unsafe { create_editor_view(&self.controller) };
+        }
+        self.probe_editor_size()
+    }
+
+    /// Query `IPlugView::getSize` on an already-created (possibly unattached) view.
+    pub fn probe_editor_size(&self) -> Option<(u32, u32)> {
+        let view = self.view.as_ref()?;
+        let mut rect = ViewRect {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
+        if unsafe { view.getSize(&raw mut rect) } != kResultOk {
+            return None;
+        }
+        let w = u32::try_from(rect.right - rect.left).ok()?;
+        let h = u32::try_from(rect.bottom - rect.top).ok()?;
+        (w >= 32 && h >= 32).then_some((w, h))
+    }
+
     fn load_from(info: &PluginInfo) -> Result<Self> {
         let module = unsafe { LoadedModule::open(&info.path) }?;
         let factory = module.factory()?;
 
         let (host_services, host_ctx) = HostServices::create();
+
+        // Steinberg Linux: factory must receive IRunLoop via IPluginFactory3
+        // before createInstance so JUCE can service timers / message thread.
+        if let Some(factory3) = factory.cast::<IPluginFactory3>() {
+            let _ = unsafe { factory3.setHostContext(host_ctx) };
+        }
 
         let cid = hex_to_tuid(&info.unique_id).ok_or_else(|| Error::LoadFailed {
             path: info.path.clone(),
@@ -797,7 +882,6 @@ impl Vst3Plugin {
             info,
             layouts: vec![BusLayout::stereo()],
             active_layout: None,
-            _module: module,
             component,
             processor,
             controller,
@@ -813,6 +897,7 @@ impl Vst3Plugin {
             _plug_frame: None,
             pending_view_resize: PendingViewResize::default(),
             pending_params,
+            _module: module,
         })
     }
 }
@@ -862,11 +947,25 @@ where
 
 impl Drop for Vst3Plugin {
     fn drop(&mut self) {
+        // Tear down GUI while the module is still mapped.
+        if self.editor_open {
+            if let Some(view) = self.view.take() {
+                unsafe { view.removed() };
+                let _ = unsafe { view.setFrame(ptr::null_mut()) };
+            }
+            self.editor_open = false;
+        } else {
+            self.view = None;
+        }
+        self._plug_frame = None;
+
         if self.processing {
             unsafe { self.processor.setProcessing(0) };
+            self.processing = false;
         }
         if self.active_layout.is_some() {
             unsafe { self.component.setActive(0) };
+            self.active_layout = None;
         }
         if let (Some(a), Some(b)) = (&self.component_cp, &self.controller_cp) {
             unsafe {
@@ -874,10 +973,12 @@ impl Drop for Vst3Plugin {
                 b.disconnect(a.as_com_ref().as_ptr().cast());
             }
         }
+        // Best-effort: a failing plugin must not abort host teardown.
         if self.separate_controller {
-            unsafe { self.controller.terminate() };
+            let _ = unsafe { self.controller.terminate() };
         }
-        unsafe { self.component.terminate() };
+        let _ = unsafe { self.component.terminate() };
+        // Field drops (COM release, then `_module` last) run after this.
     }
 }
 
@@ -1056,11 +1157,11 @@ impl PluginCore for Vst3Plugin {
         if unsafe { self.component.setActive(1) } != kResultOk {
             return Err(Error::Other("IComponent::setActive(true) failed".into()));
         }
-        if unsafe { self.processor.setProcessing(1) } != kResultOk {
-            return Err(Error::Other(
-                "IAudioProcessor::setProcessing(true) failed".into(),
-            ));
-        }
+        // Some plugs (many LSP class variants) return non-OK from
+        // setProcessing until the first process() call or with certain bus
+        // layouts. Treat that as soft — still mark processing so we pair
+        // setProcessing(false) on deactivate.
+        let _ = unsafe { self.processor.setProcessing(1) };
         self.processing = true;
         self.active_layout = Some(layout);
         Ok(())
@@ -1097,10 +1198,16 @@ impl truce_rack_core::editor::PluginEditor for Vst3Plugin {
         if self.editor_open {
             return Ok(());
         }
-        let view = unsafe { create_editor_view(&self.controller) }
-            .ok_or_else(|| Error::Other("IEditController::createView returned NULL".into()))?;
+        // Reuse a view prepared via `prepare_editor_view` when present.
+        let view = match self.view.take() {
+            Some(v) => v,
+            None => unsafe { create_editor_view(&self.controller) }.ok_or_else(|| {
+                Error::Other("IEditController::createView returned NULL".into())
+            })?,
+        };
         let (type_str, parent_ptr) = platform_type_for_handle(parent);
         if unsafe { view.isPlatformTypeSupported(type_str) } != kResultOk {
+            self.view = Some(view);
             return Err(Error::Other(
                 "IPlugView::isPlatformTypeSupported returned false".into(),
             ));
@@ -1110,12 +1217,14 @@ impl truce_rack_core::editor::PluginEditor for Vst3Plugin {
         let (pending_resize, frame) = host::create_plug_frame(self.host_services.run_loop());
         self.pending_view_resize = pending_resize;
         if unsafe { view.setFrame(frame.as_ptr()) } != kResultOk {
+            self.view = Some(view);
             return Err(Error::Other("IPlugView::setFrame failed".into()));
         }
         self._plug_frame = Some(frame);
         if unsafe { view.attached(parent_ptr, type_str) } != kResultOk {
             let _ = unsafe { view.setFrame(ptr::null_mut()) };
             self._plug_frame = None;
+            self.view = Some(view);
             return Err(Error::Other("IPlugView::attached returned non-OK".into()));
         }
         self.view = Some(view);
@@ -1124,11 +1233,13 @@ impl truce_rack_core::editor::PluginEditor for Vst3Plugin {
     }
 
     fn close(&mut self) {
-        // removed() first so the plugin tears down GL against a live parent,
-        // then clear the frame / drop the view.
+        // removed() only if attached — prepare_editor_view may leave an
+        // unattached view that must not receive removed().
         if let Some(view) = self.view.take() {
-            unsafe { view.removed() };
-            let _ = unsafe { view.setFrame(ptr::null_mut()) };
+            if self.editor_open {
+                unsafe { view.removed() };
+                let _ = unsafe { view.setFrame(ptr::null_mut()) };
+            }
         }
         self._plug_frame = None;
         self.editor_open = false;

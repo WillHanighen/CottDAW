@@ -216,7 +216,11 @@ pub fn scan_paths(paths: &[PathBuf]) -> Result<Vec<PluginDescriptor>> {
             Ok((_tmp, list)) => {
                 for info in list {
                     let desc = info_to_desc_no_reprobe(&info);
-                    if !out.iter().any(|d| d.uid == desc.uid || d.path == desc.path) {
+                    // Dedupe by UID only — multi-class bundles (LSP, etc.) share one path.
+                    if !out
+                        .iter()
+                        .any(|d| d.format == desc.format && d.uid == desc.uid)
+                    {
                         out.push(desc);
                     }
                 }
@@ -737,15 +741,30 @@ impl VstPlugin {
         // Tear down any previous editor + parent fully before recreating.
         self.close_editor();
 
+        // Create the VST3 view and read getSize *before* attach, keeping that
+        // same view for open() (throwaway createView breaks JUCE/Surge).
+        let probed = match &mut self.plugin {
+            RackPlugin::Vst3(p) => p.prepare_editor_view(),
+            RackPlugin::Clap(_) | RackPlugin::Lv2(_) => None,
+        };
+        info!(
+            plugin = %self.name,
+            ?probed,
+            "editor size probe"
+        );
+
         let (parent_id, owned) = match parent_x11 {
             Some(id) => (id, None),
             None => {
+                let (w, h) = probed.unwrap_or((1024, 700));
                 info!(
                     plugin = %self.name,
+                    width = w,
+                    height = h,
                     "no host X11 parent — creating floating editor window"
                 );
                 // Map + XSync inside create so the embed exists before GL attach.
-                let win = FloatingEditorWindow::create_default(&self.name)
+                let win = FloatingEditorWindow::create(&self.name, w, h)
                     .context("create floating X11 editor parent")?;
                 let id = win.embed_window_id();
                 (id, Some(win))
@@ -753,7 +772,7 @@ impl VstPlugin {
         };
 
         let handle = truce_rack_core::editor::WindowHandle::X11(parent_id);
-        let preferred_size = {
+        {
             let editor = self
                 .plugin
                 .plugin_mut()
@@ -762,28 +781,49 @@ impl VstPlugin {
             editor
                 .open(handle, 1.0)
                 .map_err(|e| anyhow!("open editor: {e}"))?;
-            editor.size()
-        };
+            // Keep plugin view + shell in sync (probe may have been approximate).
+            if let Some((w, h)) = editor.size().or(probed) {
+                let _ = editor.set_size(w, h);
+            }
+        }
 
         if let Some(mut win) = owned {
-            if let Some((w, h)) = preferred_size {
-                // Keep shell matched to the plugin's reported size. Do this
-                // before storing so the first paint sees a stable geometry.
+            let size = self
+                .plugin
+                .plugin_mut()
+                .editor()
+                .and_then(|e| e.size())
+                .or(probed);
+            if let Some((w, h)) = size {
                 win.resize(w, h);
                 win.sync();
+                if let Some(editor) = self.plugin.plugin_mut().editor() {
+                    let _ = editor.set_size(w, h);
+                }
             }
             win.raise_embed();
             self.owned_editor = Some(win);
         }
 
-        // Give IRunLoop / baseview a couple of ticks so the first frames paint.
-        for _ in 0..4 {
+        // XEmbed handshake + IRunLoop ticks so JUCE OpenGL can first-paint.
+        for _ in 0..12 {
             self.plugin.pump_host_services();
             if let Some(editor) = self.plugin.plugin_mut().editor() {
                 editor.on_idle();
             }
             if let Some(win) = self.owned_editor.as_mut() {
                 let _ = win.pump_events();
+                win.sync_xembed_clients();
+            }
+            // Honor plugin-driven resizeView (common right after attach).
+            if let Some((w, h)) = self.plugin.take_view_resize_request() {
+                if let Some(win) = self.owned_editor.as_mut() {
+                    win.resize(w, h);
+                    win.sync();
+                }
+                if let Some(editor) = self.plugin.plugin_mut().editor() {
+                    let _ = editor.set_size(w, h);
+                }
             }
         }
         // Single delayed nudge after the Wine/yabridge child has reparented.
@@ -801,10 +841,18 @@ impl VstPlugin {
             .as_ref()
             .map(|w| w.embed_child_count())
             .unwrap_or(0);
+        if let Some(win) = self.owned_editor.as_ref() {
+            win.log_client_state();
+        }
         info!(
             plugin = %self.name,
             parent_id,
             child_count,
+            glx_parent = self
+                .owned_editor
+                .as_ref()
+                .map(|w| w.used_glx_visual())
+                .unwrap_or(false),
             "plugin editor opened"
         );
         Ok(())
@@ -844,6 +892,8 @@ impl VstPlugin {
                     self.close_editor();
                     return false;
                 }
+                // Late-arriving plugin children (JUCE OpenGL) need periodic adopt.
+                win.sync_xembed_clients();
                 result.resized_to
             }
             None => {

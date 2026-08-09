@@ -615,38 +615,16 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
         }
         ui.separator();
         ui.menu_button("Instrument (MIDI)", |ui| {
-            let mut found = false;
-            for plugin in plugins.iter().filter(|plugin| plugin.is_instrument) {
-                found = true;
-                if ui
-                    .button(format!("{} [{}]", plugin.name, plugin.format))
-                    .clicked()
-                {
-                    action = Some(ContextAction::Add(AddNodeAction::Instrument(
-                        plugin.clone(),
-                    )));
-                    ui.close_menu();
-                }
-            }
-            if !found {
-                ui.weak("No instruments found");
-            }
+            plugin_picker_menu(ui, plugins.iter().filter(|p| p.is_instrument), |plugin| {
+                action = Some(ContextAction::Add(AddNodeAction::Instrument(
+                    plugin.clone(),
+                )));
+            });
         });
         ui.menu_button("Effect (audio)", |ui| {
-            let mut found = false;
-            for plugin in plugins.iter().filter(|plugin| plugin.is_effect) {
-                found = true;
-                if ui
-                    .button(format!("{} [{}]", plugin.name, plugin.format))
-                    .clicked()
-                {
-                    action = Some(ContextAction::Add(AddNodeAction::Effect(plugin.clone())));
-                    ui.close_menu();
-                }
-            }
-            if !found {
-                ui.weak("No effects found");
-            }
+            plugin_picker_menu(ui, plugins.iter().filter(|p| p.is_effect), |plugin| {
+                action = Some(ContextAction::Add(AddNodeAction::Effect(plugin.clone())));
+            });
         });
     });
 
@@ -861,4 +839,37 @@ fn distance_to_segment(p: egui::Pos2, a: egui::Pos2, b: egui::Pos2) -> f32 {
     let t = ((p - a).dot(ab) / len_sq).clamp(0.0, 1.0);
     let proj = a + ab * t;
     p.distance(proj)
+}
+
+/// Scrollable plugin list for Instrument / Effect context submenus.
+/// Caps height to ~70% of the window so hundreds of VST3s (e.g. LSP) stay usable.
+fn plugin_picker_menu<'a, I, F>(ui: &mut egui::Ui, plugins: I, mut on_pick: F)
+where
+    I: IntoIterator<Item = &'a PluginDescriptor>,
+    F: FnMut(&PluginDescriptor),
+{
+    let plugins: Vec<_> = plugins.into_iter().collect();
+    if plugins.is_empty() {
+        ui.weak("No plugins found");
+        return;
+    }
+
+    let max_height = (ui.ctx().screen_rect().height() * 0.7).clamp(180.0, 720.0);
+    // Keep labels on one line so the menu doesn't wrap into a huge width.
+    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+
+    egui::ScrollArea::vertical()
+        .max_height(max_height)
+        .min_scrolled_height(180.0)
+        .show(ui, |ui| {
+            for plugin in plugins {
+                if ui
+                    .button(format!("{} [{}]", plugin.name, plugin.format))
+                    .clicked()
+                {
+                    on_pick(plugin);
+                    ui.close_menu();
+                }
+            }
+        });
 }

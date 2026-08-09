@@ -382,8 +382,11 @@ impl RunLoopState {
         };
         let kept = href.to_com_ptr();
         if let Ok(mut fds) = self.fds.lock() {
-            let raw = kept.as_ptr();
-            fds.retain(|e| e.handler.as_ptr() != raw);
+            // JUCE registers *many* FDs with the same IEventHandler (X11 +
+            // message pipe + timers). Key by fd, not handler pointer — the old
+            // retain-by-handler logic dropped all but the last FD and left
+            // OpenGL editors permanently black.
+            fds.retain(|e| e.fd != fd);
             fds.push(FdEntry {
                 fd,
                 handler: kept,
@@ -393,6 +396,7 @@ impl RunLoopState {
     }
 
     fn unregister_event_handler(&self, handler: *mut IEventHandler) -> i32 {
+        // Steinberg API removes all FDs for this handler instance.
         if let Ok(mut fds) = self.fds.lock() {
             fds.retain(|e| e.handler.as_ptr() != handler);
         }

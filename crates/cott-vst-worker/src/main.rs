@@ -31,14 +31,36 @@ fn main() {
         .with_writer(std::io::stderr)
         .init();
 
+    // Before any plugin `dlopen` / XOpenDisplay: enable Xlib locking so JUCE
+    // OpenGL editors can share the display across their message + GL threads.
+    if let Err(e) = init_x11_threads() {
+        warn!("{e:#}");
+    }
+
     if let Err(e) = run() {
         error!("worker fatal: {e:#}");
         std::process::exit(1);
     }
 }
 
+fn init_x11_threads() -> Result<()> {
+    let xlib = x11_dl::xlib::Xlib::open().context("load libX11 for XInitThreads")?;
+    let ok = unsafe { (xlib.XInitThreads)() };
+    if ok == 0 {
+        anyhow::bail!("XInitThreads returned 0");
+    }
+    info!("process-wide XInitThreads ok");
+    Ok(())
+}
+
 fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
+    // Standalone diagnostic: open a plugin editor and pump until the window closes.
+    // Usage: cott-vst-worker --probe-editor <path.vst3> [uid]
+    if args.get(1).map(|s| s.as_str()) == Some("--probe-editor") {
+        return probe_editor(&args[2..]);
+    }
+
     let mut shm_name = None;
     let mut sock_path = None;
     let mut i = 1;
@@ -269,5 +291,42 @@ fn send(stream: &mut UnixStream, msg: &WorkerToHost) -> Result<()> {
     let bytes = cott_ipc::encode_message(msg)?;
     stream.write_all(&bytes)?;
     stream.flush()?;
+    Ok(())
+}
+
+fn probe_editor(args: &[String]) -> Result<()> {
+    let path = PathBuf::from(args.first().context(
+        "usage: cott-vst-worker --probe-editor <plugin.vst3|so> [uid]",
+    )?);
+    let uid = args.get(1).map(|s| s.as_str()).unwrap_or("");
+    info!(
+        path = %path.display(),
+        uid,
+        "probe-editor: loading plugin"
+    );
+    let mut plugin = vst::PluginBackend::load(
+        cott_ipc::PluginFormat::Vst3,
+        &path,
+        uid,
+        48_000.0,
+        512,
+        None,
+    )
+    .context("load plugin for probe-editor")?;
+    let (name, ..) = plugin.meta();
+    info!(%name, "probe-editor: opening editor (close the window to exit)");
+    plugin
+        .open_editor(None)
+        .context("open editor for probe-editor")?;
+    // Pump until the floating shell is closed by the user (or ~30s for CI-ish runs).
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    while std::time::Instant::now() < deadline {
+        if !plugin.pump_editor() {
+            info!("probe-editor: editor closed");
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(8));
+    }
+    plugin.close_editor();
     Ok(())
 }

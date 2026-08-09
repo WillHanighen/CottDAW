@@ -296,6 +296,15 @@ pub fn name_looks_like_instrument(name: &str) -> bool {
     if name_looks_like_effect(name) {
         return false;
     }
+    // "Surge XT Effects" / "Firefly Synth 2 FX" / "CardinalFX" are processors.
+    if n.contains("effect")
+        || n.ends_with(" fx")
+        || n.contains(" fx ")
+        || n.contains("cardinalfx")
+        || (n.contains("surge") && n.contains("effect"))
+    {
+        return false;
+    }
     // Explicit instrument product tokens (before generic needles).
     const PRODUCTS: &[&str] = &[
         "pandora", // sample instrument engine
@@ -312,6 +321,20 @@ pub fn name_looks_like_instrument(name: &str) -> bool {
         "velvet",
         "halo",
         "origin",
+        // common Linux-native instruments (hosts often mis-tag as Fx)
+        "surge xt",
+        "surge",
+        "vitalium",
+        "vital",
+        "odin",
+        "nyasynth",
+        "nya",
+        "squelch",
+        "flechtwerk",
+        "firefly synth",
+        "geonkick",
+        "cardinalsynth",
+        "cardinal", // CardinalFX excluded above
         // generic
         "synth",
         "sampler",
@@ -323,7 +346,6 @@ pub fn name_looks_like_instrument(name: &str) -> bool {
         "bass",
         "lead",
         "pad",
-        "nya",
         "pluck",
         "vox",
     ];
@@ -372,7 +394,19 @@ pub fn name_looks_like_effect(name: &str) -> bool {
     if n.contains("cymatics") && n.contains("space") {
         return true;
     }
-    PRODUCTS.iter().any(|needle| n.contains(needle))
+    // Short tokens like "eq" must not match inside "effects" / "sequence".
+    PRODUCTS.iter().any(|needle| {
+        if needle.len() <= 3 {
+            name_has_token(&n, needle)
+        } else {
+            n.contains(needle)
+        }
+    })
+}
+
+fn name_has_token(name: &str, token: &str) -> bool {
+    name.split(|c: char| !c.is_ascii_alphanumeric())
+        .any(|part| part == token)
 }
 
 fn bundle_binary_path(bundle: &Path) -> std::path::PathBuf {
@@ -504,6 +538,14 @@ mod tests {
         assert!(name_looks_like_instrument("Cymatics Pandora"));
         assert!(name_looks_like_instrument("Cymatics Lotus"));
         assert!(!name_looks_like_effect("Cymatics Pandora"));
+        assert!(name_looks_like_instrument("Surge XT"));
+        assert!(!name_looks_like_instrument("Surge XT Effects"));
+        assert!(name_looks_like_instrument("Vital"));
+        assert!(name_looks_like_instrument("Odin2"));
+        assert!(name_looks_like_instrument("SquelchBox"));
+        assert!(name_looks_like_instrument("Flechtwerk"));
+        assert!(name_looks_like_instrument("Firefly Synth 2"));
+        assert!(!name_looks_like_instrument("Firefly Synth 2 FX"));
     }
 
     #[test]
