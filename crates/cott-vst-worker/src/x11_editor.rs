@@ -13,9 +13,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 use x11_dl::xlib::{
-    ButtonMotionMask, ButtonPressMask, ButtonReleaseMask, CWBackPixel, CWBorderPixel, CWColormap,
-    CWEventMask, ClientMessage, ConfigureNotify, Display, ExposureMask, False, InputOutput,
-    KeyPressMask, PointerMotionMask, StructureNotifyMask, SubstructureNotifyMask, Window, XEvent,
+    CWBackPixel, CWBorderPixel, CWColormap, CWEventMask, ClientMessage, ConfigureNotify, Display,
+    ExposureMask, False, InputOutput, StructureNotifyMask, SubstructureNotifyMask, Window, XEvent,
     XSetWindowAttributes, Xlib,
 };
 
@@ -109,14 +108,12 @@ impl FloatingEditorWindow {
 
             // Embed parent: normal child of shell (NOT override_redirect).
             // override_redirect + GL child often paints black under NVIDIA/XWayland.
-            attrs.event_mask = ExposureMask
-                | KeyPressMask
-                | ButtonPressMask
-                | ButtonReleaseMask
-                | PointerMotionMask
-                | ButtonMotionMask
-                | SubstructureNotifyMask
-                | StructureNotifyMask;
+            //
+            // Do NOT select Button/Key/Motion masks here — if the Wine/yabridge
+            // child fails to take pointer focus, the empty parent would swallow
+            // clicks (white/dead GUI). Structure notifies are enough for size.
+            attrs.event_mask =
+                ExposureMask | SubstructureNotifyMask | StructureNotifyMask;
             let embed_mask = CWBackPixel | CWBorderPixel | CWColormap | CWEventMask;
             let embed = (xlib.XCreateWindow)(
                 display,
@@ -237,6 +234,40 @@ impl FloatingEditorWindow {
         unsafe {
             (self.xlib.XMapRaised)(self.display, self.embed);
             (self.xlib.XFlush)(self.display);
+        }
+    }
+
+    /// Nudge the shell by 1px and back. Wine 9.22+ / yabridge need a real
+    /// ConfigureNotify with on-screen coordinates before mouse hits land in
+    /// the embedded editor; jiggling the window is the usual workaround.
+    pub fn sync_wine_coordinates(&self) {
+        unsafe {
+            let mut root: Window = 0;
+            let mut x = 0i32;
+            let mut y = 0i32;
+            let mut width = 0u32;
+            let mut height = 0u32;
+            let mut border = 0u32;
+            let mut depth = 0u32;
+            if (self.xlib.XGetGeometry)(
+                self.display,
+                self.shell,
+                &mut root,
+                &mut x,
+                &mut y,
+                &mut width,
+                &mut height,
+                &mut border,
+                &mut depth,
+            ) == 0
+            {
+                return;
+            }
+            (self.xlib.XMoveWindow)(self.display, self.shell, x + 1, y);
+            (self.xlib.XSync)(self.display, False);
+            (self.xlib.XMoveWindow)(self.display, self.shell, x, y);
+            (self.xlib.XSync)(self.display, False);
+            debug!(x, y, "nudged floating editor to sync Wine mouse coords");
         }
     }
 

@@ -463,15 +463,7 @@ fn descriptor_from_bundle_path(
         .and_then(|s| s.to_str())
         .unwrap_or("Plugin")
         .to_string();
-    let is_instrument = if crate::classify::name_looks_like_effect(&name) {
-        false
-    } else if crate::classify::name_looks_like_instrument(&name) {
-        true
-    } else {
-        prefer_instrument
-    };
-    let ambiguous = !crate::classify::name_looks_like_instrument(&name)
-        && !crate::classify::name_looks_like_effect(&name);
+    let hint = crate::classify::classify_bundle(bundle, prefer_instrument);
     PluginDescriptor {
         format,
         uid: format!("{}-path:{}", format.as_str(), stable_path_hash(bundle)),
@@ -482,10 +474,8 @@ fn descriptor_from_bundle_path(
             String::new()
         },
         path: bundle.to_path_buf(),
-        is_instrument,
-        // Deferred yabridge entries may not expose category metadata until Wine
-        // starts. Ambiguous names are offered in both browser sections.
-        is_effect: !is_instrument || ambiguous,
+        is_instrument: hint.is_instrument,
+        is_effect: hint.is_effect,
         has_editor: true,
     }
 }
@@ -522,17 +512,27 @@ fn info_to_desc(
     format: PluginFormat,
 ) -> PluginDescriptor {
     // Do not re-open the module here (that re-triggers yabridge/Wine).
-    let is_instrument = matches!(info.category, PluginCategory::Instrument)
-        || info.accepts_midi
-        || crate::classify::name_looks_like_instrument(&info.name);
+    let from_info = matches!(info.category, PluginCategory::Instrument) || info.accepts_midi;
+    let hint = if looks_like_yabridge_path(&info.path) {
+        crate::classify::classify_bundle(&info.path, /*prefer_instrument*/ true)
+    } else if from_info || crate::classify::name_looks_like_instrument(&info.name) {
+        crate::classify::ClassHint::instrument()
+    } else if crate::classify::name_looks_like_effect(&info.name) {
+        crate::classify::ClassHint::effect()
+    } else {
+        crate::classify::ClassHint {
+            is_instrument: from_info,
+            is_effect: !from_info,
+        }
+    };
     PluginDescriptor {
         format,
         uid: info.unique_id.clone(),
         name: info.name.clone(),
         vendor: info.vendor.clone(),
         path: info.path.clone(),
-        is_instrument,
-        is_effect: !is_instrument,
+        is_instrument: hint.is_instrument,
+        is_effect: hint.is_effect,
         has_editor: info.has_editor,
     }
 }
@@ -664,11 +664,15 @@ impl VstPlugin {
         }
         let latency = plugin.latency_samples();
         let name = info.name.clone();
-        // Prefer VST category / MIDI IO — do not force yabridge shells to instruments
-        // (yabridge FX would otherwise take the wrong MIDI/audio path).
-        let is_instrument = matches!(info.category, PluginCategory::Instrument)
-            || info.accepts_midi
-            || crate::classify::name_looks_like_instrument(&info.name);
+        // truce-rack hardcodes Effect / accepts_midi=false for yabridge shells.
+        // Prefer moduleinfo + factory + name heuristics so synths get MIDI ports.
+        let hint = crate::classify::classify_loaded(
+            path,
+            &name,
+            &info.unique_id,
+            info.accepts_midi || matches!(info.category, PluginCategory::Instrument),
+        );
+        let is_instrument = hint.is_instrument;
         // Scan-time `info.has_editor` is often false; use the loaded plugin's flag.
         let has_editor = plugin.plugin().info().has_editor;
         info!(
@@ -781,6 +785,15 @@ impl VstPlugin {
             if let Some(win) = self.owned_editor.as_mut() {
                 let _ = win.pump_events();
             }
+        }
+        // Single delayed nudge after the Wine/yabridge child has reparented.
+        // Doing this during attach can race older JUCE OpenGL editors (Origin)
+        // and crash the Wine host. Skip if no child embedded yet.
+        if let Some(win) = self.owned_editor.as_ref()
+            && win.embed_child_count() > 0
+        {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            win.sync_wine_coordinates();
         }
 
         let child_count = self

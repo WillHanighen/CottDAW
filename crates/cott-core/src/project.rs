@@ -302,25 +302,14 @@ impl Project {
         }
 
         let instance_id = PluginInstanceId::new();
-        let inst = GraphNode {
-            id: NodeId::new(),
-            name: plugin_name.clone(),
-            kind: NodeKind::PluginInstrument {
-                instance_id,
-                plugin_format,
-                plugin_uid: plugin_uid.clone(),
-                plugin_path,
-                plugin_name,
-                failed: false,
-            },
-            inputs: vec![crate::graph::Port::midi_in("MIDI")],
-            outputs: vec![
-                crate::graph::Port::audio_out("L", 0),
-                crate::graph::Port::audio_out("R", 1),
-            ],
-            position: [200.0, y],
-            latency_samples: 0,
-        };
+        let mut inst = GraphNode::plugin_instrument(
+            instance_id,
+            plugin_format,
+            plugin_uid.clone(),
+            plugin_path,
+            plugin_name,
+        );
+        inst.position = [200.0, y];
         let inst_id = inst.id;
         // Drop only edges leaving the MIDI source (re-route through the new instrument).
         self.graph.edges.retain(|_, e| e.from_node != midi_src);
@@ -357,6 +346,38 @@ impl Project {
             plugin_path,
             plugin_name,
         )
+    }
+
+    /// Add a floating instrument node with no track ownership and no auto-wiring.
+    /// Wire it manually in the graph editor.
+    pub fn add_plugin_instrument(
+        &mut self,
+        plugin_format: String,
+        plugin_uid: String,
+        plugin_path: String,
+        plugin_name: String,
+        position: [f32; 2],
+    ) -> NodeId {
+        let instance_id = PluginInstanceId::new();
+        let mut inst = GraphNode::plugin_instrument(
+            instance_id,
+            plugin_format,
+            plugin_uid.clone(),
+            plugin_path,
+            plugin_name,
+        );
+        inst.position = position;
+        let node_id = self.graph.add_node(inst);
+        self.plugin_states.insert(
+            instance_id,
+            PluginStateBlob {
+                instance_id,
+                plugin_uid,
+                data: Vec::new(),
+            },
+        );
+        self.touch();
+        node_id
     }
 
     pub fn add_plugin_effect(
@@ -794,6 +815,37 @@ mod tests {
             b"hit-bytes"
         );
         assert_eq!(roundtrip.meta.name, "Convert");
+    }
+
+    #[test]
+    fn add_plugin_instrument_is_floating() {
+        let mut project = Project::new("Float");
+        let track = project.add_midi_track("Synth");
+        let (attached_id, _) = project
+            .attach_instrument(track, "a.uid".into(), "/tmp/a.vst3".into(), "A".into())
+            .expect("attach");
+        let edges_before = project.graph.edges.len();
+        let nodes_before = project.graph.nodes.len();
+
+        let floating_id = project.add_plugin_instrument(
+            "vst3".into(),
+            "b.uid".into(),
+            "/tmp/b.vst3".into(),
+            "B".into(),
+            [120.0, 80.0],
+        );
+
+        assert!(project.graph.nodes.contains_key(&floating_id));
+        assert!(project.graph.nodes.contains_key(&attached_id));
+        assert_eq!(project.graph.edges.len(), edges_before);
+        assert_eq!(project.graph.nodes.len(), nodes_before + 1);
+        let track_ref = project.tracks.iter().find(|t| t.id == track).unwrap();
+        assert_eq!(track_ref.instrument_node, Some(attached_id));
+        assert!(!project
+            .graph
+            .edges
+            .values()
+            .any(|e| e.from_node == floating_id || e.to_node == floating_id));
     }
 
     #[test]

@@ -106,7 +106,7 @@ impl CottApp {
             .find(|t| t.kind == TrackKind::Midi)
             .map(|t| t.id)
         {
-            app.attach_default_cott_synth(track_id, true);
+            app.attach_default_cott_synth(track_id, false);
         }
         app.sync_engine();
         // Never block window creation on VST scan (yabridge/Wine can take minutes).
@@ -634,7 +634,6 @@ impl CottApp {
             desc.uid,
             desc.path,
             COTT_SYNTH_NAME.into(),
-            [200.0, 120.0],
         );
         let instrument_node = self
             .project
@@ -1062,7 +1061,6 @@ impl CottApp {
         uid: String,
         path: PathBuf,
         name: String,
-        position: [f32; 2],
     ) {
         let track_id = self
             .ui
@@ -1099,9 +1097,7 @@ impl CottApp {
         if let Some(old_instance) = unloaded {
             self.plugin_host.lock().unload(old_instance);
         }
-        if let Some(node) = self.project.graph.nodes.get_mut(&node_id) {
-            node.position = position;
-        }
+        // Position comes from attach_plugin_instrument (aligned with the track's MIDI/gain row).
         let instance_id = match &self.project.graph.nodes[&node_id].kind {
             NodeKind::PluginInstrument { instance_id, .. } => *instance_id,
             _ => PluginInstanceId::new(),
@@ -1130,6 +1126,51 @@ impl CottApp {
                 {
                     track.instrument_node = None;
                 }
+                self.sync_engine();
+                self.status = format!("Plugin load failed: {e}");
+            }
+        }
+    }
+
+    /// Drop an instrument into the routing graph with no track attach and no auto-wiring.
+    pub fn load_floating_instrument(
+        &mut self,
+        format: PluginFormat,
+        uid: String,
+        path: PathBuf,
+        name: String,
+        position: [f32; 2],
+    ) {
+        let node_id = self.project.add_plugin_instrument(
+            format.as_str().into(),
+            uid.clone(),
+            path.display().to_string(),
+            name.clone(),
+            position,
+        );
+        let instance_id = match &self.project.graph.nodes[&node_id].kind {
+            NodeKind::PluginInstrument { instance_id, .. } => *instance_id,
+            _ => {
+                self.status = "Could not create instrument node".into();
+                return;
+            }
+        };
+        let sr = self.audio.as_ref().map(|a| a.sample_rate).unwrap_or(48_000) as f64;
+        let bs = self.audio.as_ref().map(|a| a.buffer_size).unwrap_or(256);
+        let load_result = {
+            let mut host = self.plugin_host.lock();
+            host.load(instance_id, format, &uid, &path, sr, bs, None)
+        };
+        match load_result {
+            Ok(()) => {
+                self.sync_engine();
+                self.ui.selected_node = Some(node_id);
+                self.status = format!("Loaded instrument {name} (unconnected)");
+            }
+            Err(e) => {
+                error!("plugin load: {e:#}");
+                self.project.plugin_states.shift_remove(&instance_id);
+                self.project.graph.remove_node(node_id);
                 self.sync_engine();
                 self.status = format!("Plugin load failed: {e}");
             }

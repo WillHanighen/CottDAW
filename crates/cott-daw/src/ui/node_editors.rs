@@ -31,6 +31,7 @@ pub fn draw(app: &mut CottApp, ctx: &egui::Context) {
             .open(&mut open)
             .default_width(320.0)
             .resizable(true)
+            .order(egui::Order::Foreground)
             .show(ctx, |ui| match &node.kind {
                 NodeKind::GainPan {
                     gain_db,

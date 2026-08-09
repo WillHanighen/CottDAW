@@ -105,7 +105,7 @@ impl Default for CottFilterParams {
 
 impl Plugin for CottFilter {
     const NAME: &'static str = "CottFilter";
-    const VENDOR: &'static str = "Cottage End";
+    const VENDOR: &'static str = "Cottage";
     const URL: &'static str = "https://github.com/cottage-end/CottDAW";
     const EMAIL: &'static str = "dev@cottage-end.local";
 

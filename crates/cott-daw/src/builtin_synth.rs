@@ -10,7 +10,7 @@ use tracing::{info, warn};
 /// Stable catalog UID (VST3 CID bytes for `CottSynthVST3CE!` as hex).
 pub const COTT_SYNTH_UID: &str = "436F747453796E746856535433434521";
 pub const COTT_SYNTH_NAME: &str = "CottSynth";
-pub const COTT_SYNTH_VENDOR: &str = "Cottage End";
+pub const COTT_SYNTH_VENDOR: &str = "Cottage";
 
 /// Locate the bundled `cott-synth.vst3` next to the DAW / in the workspace build tree.
 pub fn resolve_cott_synth_vst3() -> Option<PathBuf> {

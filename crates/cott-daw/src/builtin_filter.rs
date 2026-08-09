@@ -9,7 +9,7 @@ use tracing::{info, warn};
 /// Stable catalog UID (VST3 CID bytes for `CottFiltVST3CE!!` as hex).
 pub const COTT_FILTER_UID: &str = "436F747446696C745653543343452121";
 pub const COTT_FILTER_NAME: &str = "CottFilter";
-pub const COTT_FILTER_VENDOR: &str = "Cottage End";
+pub const COTT_FILTER_VENDOR: &str = "Cottage";
 
 /// Locate the bundled `cott-filter.vst3` next to the DAW / in the workspace build tree.
 pub fn resolve_cott_filter_vst3() -> Option<PathBuf> {

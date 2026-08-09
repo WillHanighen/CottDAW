@@ -142,10 +142,9 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
     }
     app.ui.graph_canvas_origin = Some(rect.min);
 
-    let pointer = resp
-        .interact_pointer_pos()
-        .or_else(|| ui.ctx().pointer_interact_pos())
-        .or_else(|| ui.ctx().pointer_latest_pos());
+    // Only positions owned by this canvas — never fall back to global pointer
+    // (floating node editors sit above the router and must keep exclusive input).
+    let pointer = resp.interact_pointer_pos().or_else(|| resp.hover_pos());
 
     // Toolbar zoom (exact entry or +/-) around the canvas center.
     if let Some(pct) = pending_zoom_pct {
@@ -363,14 +362,13 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
         }
     }
 
-    // Only start canvas interactions when the press is inside the canvas
-    // (ignore lower-panel resize grip, tabs, toolbar).
+    // Start only when this canvas owns the press (floating editors / grip / tabs
+    // must not begin router gestures). Once started, keep tracking while the
+    // button is held even if the pointer crosses a window.
     let primary_down = ui.input(|i| i.pointer.primary_down());
     let primary_pressed = ui.input(|i| i.pointer.primary_pressed());
-    let primary_released = ui.input(|i| i.pointer.primary_released());
-    let pointer_in_canvas = pointer.is_some_and(|pos| rect.contains(pos));
 
-    if primary_pressed && pointer_in_canvas {
+    if resp.is_pointer_button_down_on() && primary_pressed {
         if let Some(pos) = pointer {
             let mut started_connect = false;
             for ((node_id, port_id), port_pos) in &port_positions {
@@ -407,11 +405,11 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
         }
     }
 
-    if primary_down
-        && (app.ui.graph_drag_node.is_some()
-            || app.ui.graph_connect_from.is_some()
-            || app.ui.graph_panning)
-    {
+    let graph_gesture_active = app.ui.graph_drag_node.is_some()
+        || app.ui.graph_connect_from.is_some()
+        || app.ui.graph_panning;
+
+    if graph_gesture_active && primary_down {
         let delta = ui.ctx().input(|i| i.pointer.delta());
         if app.ui.graph_panning {
             app.ui.graph_pan += delta;
@@ -422,7 +420,10 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
             }
         }
         if let Some((from_node, from_port)) = app.ui.graph_connect_from {
-            if let Some(pos) = pointer {
+            let tip = pointer
+                .or_else(|| ui.ctx().pointer_interact_pos())
+                .or_else(|| ui.ctx().pointer_latest_pos());
+            if let Some(pos) = tip {
                 if let Some(start) = port_positions.get(&(from_node, from_port)) {
                     painter
                         .line_segment([*start, pos], egui::Stroke::new(2.0, egui::Color32::YELLOW));
@@ -431,9 +432,14 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
         }
     }
 
-    if primary_released {
+    // Finish only gestures that this canvas started (don't react to releases
+    // over floating windows when nothing was in progress here).
+    if graph_gesture_active && !primary_down {
         if let Some((from_node, from_port)) = app.ui.graph_connect_from.take() {
-            if let Some(pos) = pointer {
+            if let Some(pos) = pointer
+                .or_else(|| ui.ctx().pointer_interact_pos())
+                .or_else(|| ui.ctx().pointer_latest_pos())
+            {
                 if let Some((to_node, to_port)) =
                     hit_input_port(&port_positions, &app.project.graph, pos)
                 {
@@ -704,7 +710,8 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
             app.sync_engine();
         }
         Some(ContextAction::Add(AddNodeAction::Instrument(plugin))) => {
-            app.load_instrument_on_selected_track(
+            // Floating only: never attach to a track, replace an instrument, or auto-wire.
+            app.load_floating_instrument(
                 plugin.format,
                 plugin.uid,
                 plugin.path,

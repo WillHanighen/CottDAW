@@ -436,6 +436,31 @@ impl GraphNode {
         }
     }
 
+    pub fn plugin_instrument(
+        instance_id: PluginInstanceId,
+        plugin_format: String,
+        plugin_uid: String,
+        plugin_path: String,
+        plugin_name: String,
+    ) -> Self {
+        Self {
+            id: NodeId::new(),
+            name: plugin_name.clone(),
+            kind: NodeKind::PluginInstrument {
+                instance_id,
+                plugin_format,
+                plugin_uid,
+                plugin_path,
+                plugin_name,
+                failed: false,
+            },
+            inputs: vec![Port::midi_in("MIDI")],
+            outputs: vec![Port::audio_out("L", 0), Port::audio_out("R", 1)],
+            position: [0.0, 0.0],
+            latency_samples: 0,
+        }
+    }
+
     pub fn plugin_effect(
         instance_id: PluginInstanceId,
         plugin_format: String,

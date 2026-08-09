@@ -37,7 +37,7 @@ struct Vst2Host {
 
 impl Host for Vst2Host {
     fn get_info(&self) -> (isize, String, String) {
-        (1, "Cottage End".into(), "CottDAW".into())
+        (1, "Cottage".into(), "CottDAW".into())
     }
 
     fn get_block_size(&self) -> isize {

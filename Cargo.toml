@@ -17,7 +17,7 @@ default-members = ["crates/cott-daw"]
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
-authors = ["Cottage End"]
+authors = ["Cottage"]
 
 [workspace.dependencies]
 cott-core = { path = "crates/cott-core" }

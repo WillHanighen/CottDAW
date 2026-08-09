@@ -334,7 +334,6 @@ pub fn draw(app: &mut CottApp, ctx: &egui::Context) {
     }
     transport::draw_top_bar(app, ctx);
     export_dialog::draw(app, ctx);
-    node_editors::draw(app, ctx);
 
     // Outermost bottom panel first so the status bar stays pinned to the screen edge.
     egui::TopBottomPanel::bottom("status")
@@ -369,6 +368,9 @@ pub fn draw(app: &mut CottApp, ctx: &egui::Context) {
     egui::CentralPanel::default().show(ctx, |ui| {
         arrangement::draw(app, ui);
     });
+
+    // After panels so floating editors sit above the routing canvas for hit-testing.
+    node_editors::draw(app, ctx);
 }
 
 fn draw_lower_panel(app: &mut CottApp, ctx: &egui::Context) {
@@ -505,7 +507,6 @@ fn draw_browser(app: &mut CottApp, ui: &mut egui::Ui) {
                         plugin.uid,
                         plugin.path,
                         plugin.name,
-                        [200.0, 120.0],
                     );
                 } else {
                     app.load_effect(

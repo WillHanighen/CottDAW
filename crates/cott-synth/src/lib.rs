@@ -168,7 +168,7 @@ impl Default for CottSynthParams {
 
 impl Plugin for CottSynth {
     const NAME: &'static str = "CottSynth";
-    const VENDOR: &'static str = "Cottage End";
+    const VENDOR: &'static str = "Cottage";
     const URL: &'static str = "https://github.com/cottage-end/CottDAW";
     const EMAIL: &'static str = "dev@cottage-end.local";
 
@@ -230,7 +230,7 @@ impl Plugin for CottSynth {
                                         .color(Color32::from_rgb(180, 220, 210)),
                                 );
                                 ui.label(
-                                    RichText::new(format!("{MAX_VOICES}-voice · Cottage End"))
+                                    RichText::new(format!("{MAX_VOICES}-voice · Cottage"))
                                         .size(12.0)
                                         .color(Color32::from_rgb(140, 148, 160)),
                                 );
