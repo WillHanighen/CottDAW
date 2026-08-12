@@ -262,10 +262,7 @@ where
             .or_else(|| mixer.get("master_pan"))
             .and_then(|v| v.as_f64())
             .unwrap_or(0.0) as f32;
-        let mute = mixer
-            .get("mute")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
+        let mute = mixer.get("mute").and_then(|v| v.as_bool()).unwrap_or(false);
         return Ok(NodeKind::SumMixer {
             strips: default_mixer_strips(),
             master_gain_db,
@@ -308,8 +305,11 @@ impl GraphNode {
                 mute: false,
                 solo: false,
             },
-            inputs: vec![Port::audio_in("L", 0), Port::audio_in("R", 1)],
-            outputs: vec![Port::audio_out("L", 0), Port::audio_out("R", 1)],
+            inputs: vec![Port::audio_in(stereo_in_name(0), 0), Port::audio_in(stereo_in_name(1), 1)],
+            outputs: vec![
+                Port::audio_out(stereo_out_name(0), 0),
+                Port::audio_out(stereo_out_name(1), 1),
+            ],
             position: [0.0, 0.0],
             latency_samples: 0,
         }
@@ -321,7 +321,7 @@ impl GraphNode {
             name: name.into(),
             kind: NodeKind::MidiClipSource { track_id },
             inputs: vec![],
-            outputs: vec![Port::midi_out("MIDI")],
+            outputs: vec![Port::midi_out("MIDI Out")],
             position: [0.0, 0.0],
             latency_samples: 0,
         }
@@ -333,7 +333,10 @@ impl GraphNode {
             name: name.into(),
             kind: NodeKind::AudioClipSource { track_id },
             inputs: vec![],
-            outputs: vec![Port::audio_out("L", 0), Port::audio_out("R", 1)],
+            outputs: vec![
+                Port::audio_out(stereo_out_name(0), 0),
+                Port::audio_out(stereo_out_name(1), 1),
+            ],
             position: [0.0, 0.0],
             latency_samples: 0,
         }
@@ -344,7 +347,7 @@ impl GraphNode {
             id: NodeId::new(),
             name: "Master".into(),
             kind: NodeKind::MasterOutput,
-            inputs: vec![Port::audio_in("L", 0), Port::audio_in("R", 1)],
+            inputs: vec![Port::audio_in(stereo_in_name(0), 0), Port::audio_in(stereo_in_name(1), 1)],
             outputs: vec![],
             position: [600.0, 100.0],
             latency_samples: 0,
@@ -354,9 +357,8 @@ impl GraphNode {
     pub fn sum_mixer(name: impl Into<String>) -> Self {
         let mut inputs = Vec::with_capacity(MIXER_STRIP_COUNT * 2);
         for i in 0..MIXER_STRIP_COUNT {
-            let n = i + 1;
-            inputs.push(Port::audio_in(format!("In{n} L"), (i * 2) as u32));
-            inputs.push(Port::audio_in(format!("In{n} R"), (i * 2 + 1) as u32));
+            inputs.push(Port::audio_in(stereo_in_branch_name(i, 0), (i * 2) as u32));
+            inputs.push(Port::audio_in(stereo_in_branch_name(i, 1), (i * 2 + 1) as u32));
         }
         Self {
             id: NodeId::new(),
@@ -368,7 +370,10 @@ impl GraphNode {
                 mute: false,
             },
             inputs,
-            outputs: vec![Port::audio_out("L", 0), Port::audio_out("R", 1)],
+            outputs: vec![
+                Port::audio_out(stereo_out_name(0), 0),
+                Port::audio_out(stereo_out_name(1), 1),
+            ],
             position: [400.0, 100.0],
             latency_samples: 0,
         }
@@ -382,12 +387,12 @@ impl GraphNode {
                 a: SplitterBranch::default(),
                 b: SplitterBranch::default(),
             },
-            inputs: vec![Port::audio_in("L", 0), Port::audio_in("R", 1)],
+            inputs: vec![Port::audio_in(stereo_in_name(0), 0), Port::audio_in(stereo_in_name(1), 1)],
             outputs: vec![
-                Port::audio_out("A L", 0),
-                Port::audio_out("A R", 1),
-                Port::audio_out("B L", 2),
-                Port::audio_out("B R", 3),
+                Port::audio_out(stereo_out_branch_name(0, 0), 0),
+                Port::audio_out(stereo_out_branch_name(0, 1), 1),
+                Port::audio_out(stereo_out_branch_name(1, 0), 2),
+                Port::audio_out(stereo_out_branch_name(1, 1), 3),
             ],
             position: [400.0, 200.0],
             latency_samples: 0,
@@ -397,14 +402,14 @@ impl GraphNode {
     pub fn midi_mixer(name: impl Into<String>) -> Self {
         let mut inputs = Vec::with_capacity(MIDI_MIXER_INPUT_COUNT);
         for i in 0..MIDI_MIXER_INPUT_COUNT {
-            inputs.push(Port::midi_in(format!("In{}", i + 1)));
+            inputs.push(Port::midi_in(format!("MIDI In {}", branch_letter(i))));
         }
         Self {
             id: NodeId::new(),
             name: name.into(),
             kind: NodeKind::MidiMixer,
             inputs,
-            outputs: vec![Port::midi_out("Out")],
+            outputs: vec![Port::midi_out("MIDI Out")],
             position: [300.0, 160.0],
             latency_samples: 0,
         }
@@ -415,8 +420,11 @@ impl GraphNode {
             id: NodeId::new(),
             name: name.into(),
             kind: NodeKind::MidiSplitter,
-            inputs: vec![Port::midi_in("In")],
-            outputs: vec![Port::midi_out("A"), Port::midi_out("B")],
+            inputs: vec![Port::midi_in("MIDI In")],
+            outputs: vec![
+                Port::midi_out("MIDI Out A"),
+                Port::midi_out("MIDI Out B"),
+            ],
             position: [300.0, 240.0],
             latency_samples: 0,
         }
@@ -429,8 +437,11 @@ impl GraphNode {
             kind: NodeKind::BuiltinSynth {
                 params: SynthParams::default(),
             },
-            inputs: vec![Port::midi_in("MIDI")],
-            outputs: vec![Port::audio_out("L", 0), Port::audio_out("R", 1)],
+            inputs: vec![Port::midi_in("MIDI In")],
+            outputs: vec![
+                Port::audio_out(stereo_out_name(0), 0),
+                Port::audio_out(stereo_out_name(1), 1),
+            ],
             position: [200.0, 0.0],
             latency_samples: 0,
         }
@@ -454,8 +465,11 @@ impl GraphNode {
                 plugin_name,
                 failed: false,
             },
-            inputs: vec![Port::midi_in("MIDI")],
-            outputs: vec![Port::audio_out("L", 0), Port::audio_out("R", 1)],
+            inputs: vec![Port::midi_in("MIDI In")],
+            outputs: vec![
+                Port::audio_out(stereo_out_name(0), 0),
+                Port::audio_out(stereo_out_name(1), 1),
+            ],
             position: [0.0, 0.0],
             latency_samples: 0,
         }
@@ -480,8 +494,11 @@ impl GraphNode {
                 bypass: false,
                 failed: false,
             },
-            inputs: vec![Port::audio_in("L", 0), Port::audio_in("R", 1)],
-            outputs: vec![Port::audio_out("L", 0), Port::audio_out("R", 1)],
+            inputs: vec![Port::audio_in(stereo_in_name(0), 0), Port::audio_in(stereo_in_name(1), 1)],
+            outputs: vec![
+                Port::audio_out(stereo_out_name(0), 0),
+                Port::audio_out(stereo_out_name(1), 1),
+            ],
             position: [0.0, 0.0],
             latency_samples: 0,
         }
@@ -509,44 +526,134 @@ impl GraphNode {
             .find(|p| p.id == id)
     }
 
-    /// Expand legacy mixer port layouts after load (keeps existing port IDs).
+    /// Expand legacy mixer port layouts and normalize port labels after load
+    /// (keeps existing port IDs).
     pub fn migrate_ports(&mut self) {
         match &self.kind {
             NodeKind::SumMixer { .. } => {
-                if self.inputs.len() >= MIXER_STRIP_COUNT * 2 {
-                    return;
-                }
-                let mut by_ch: IndexMap<u32, Port> = IndexMap::new();
-                for port in self.inputs.drain(..) {
-                    if port.port_type == PortType::Audio {
-                        by_ch.insert(port.channel, port);
+                if self.inputs.len() < MIXER_STRIP_COUNT * 2 {
+                    let mut by_ch: IndexMap<u32, Port> = IndexMap::new();
+                    for port in self.inputs.drain(..) {
+                        if port.port_type == PortType::Audio {
+                            by_ch.insert(port.channel, port);
+                        }
                     }
+                    let mut inputs = Vec::with_capacity(MIXER_STRIP_COUNT * 2);
+                    for i in 0..MIXER_STRIP_COUNT {
+                        let l_ch = (i * 2) as u32;
+                        let r_ch = (i * 2 + 1) as u32;
+                        let mut l = by_ch
+                            .shift_remove(&l_ch)
+                            .unwrap_or_else(|| Port::audio_in(stereo_in_branch_name(i, 0), l_ch));
+                        l.channel = l_ch;
+                        l.is_input = true;
+                        inputs.push(l);
+                        let mut r = by_ch
+                            .shift_remove(&r_ch)
+                            .unwrap_or_else(|| Port::audio_in(stereo_in_branch_name(i, 1), r_ch));
+                        r.channel = r_ch;
+                        r.is_input = true;
+                        inputs.push(r);
+                    }
+                    self.inputs = inputs;
                 }
-                let mut inputs = Vec::with_capacity(MIXER_STRIP_COUNT * 2);
-                for i in 0..MIXER_STRIP_COUNT {
-                    let n = i + 1;
-                    let l_ch = (i * 2) as u32;
-                    let r_ch = (i * 2 + 1) as u32;
-                    let mut l = by_ch
-                        .shift_remove(&l_ch)
-                        .unwrap_or_else(|| Port::audio_in(format!("In{n} L"), l_ch));
-                    l.name = format!("In{n} L");
-                    l.channel = l_ch;
-                    l.is_input = true;
-                    let mut r = by_ch
-                        .shift_remove(&r_ch)
-                        .unwrap_or_else(|| Port::audio_in(format!("In{n} R"), r_ch));
-                    r.name = format!("In{n} R");
-                    r.channel = r_ch;
-                    r.is_input = true;
-                    inputs.push(l);
-                    inputs.push(r);
+                for (i, port) in self.inputs.iter_mut().enumerate() {
+                    let strip = i / 2;
+                    let ch = (i % 2) as u32;
+                    port.name = stereo_in_branch_name(strip, ch);
                 }
-                self.inputs = inputs;
+                for port in &mut self.outputs {
+                    port.name = stereo_out_name(port.channel);
+                }
             }
-            _ => {}
+            NodeKind::StereoSplitter { .. } => {
+                for port in &mut self.inputs {
+                    port.name = stereo_in_name(port.channel);
+                }
+                for (i, port) in self.outputs.iter_mut().enumerate() {
+                    port.name = stereo_out_branch_name(i / 2, (i % 2) as u32);
+                }
+            }
+            NodeKind::MidiMixer => {
+                for (i, port) in self.inputs.iter_mut().enumerate() {
+                    port.name = format!("MIDI In {}", branch_letter(i));
+                }
+                for port in &mut self.outputs {
+                    port.name = "MIDI Out".into();
+                }
+            }
+            NodeKind::MidiSplitter => {
+                for port in &mut self.inputs {
+                    port.name = "MIDI In".into();
+                }
+                for (i, port) in self.outputs.iter_mut().enumerate() {
+                    port.name = format!("MIDI Out {}", branch_letter(i));
+                }
+            }
+            NodeKind::MidiClipSource { .. } => {
+                for port in &mut self.outputs {
+                    port.name = "MIDI Out".into();
+                }
+            }
+            NodeKind::AudioClipSource { .. } => {
+                for port in &mut self.outputs {
+                    port.name = stereo_out_name(port.channel);
+                }
+            }
+            NodeKind::MasterOutput => {
+                for port in &mut self.inputs {
+                    port.name = stereo_in_name(port.channel);
+                }
+            }
+            NodeKind::GainPan { .. }
+            | NodeKind::PluginEffect { .. } => {
+                for port in &mut self.inputs {
+                    port.name = stereo_in_name(port.channel);
+                }
+                for port in &mut self.outputs {
+                    port.name = stereo_out_name(port.channel);
+                }
+            }
+            NodeKind::BuiltinSynth { .. } | NodeKind::PluginInstrument { .. } => {
+                for port in &mut self.inputs {
+                    port.name = "MIDI In".into();
+                }
+                for port in &mut self.outputs {
+                    port.name = stereo_out_name(port.channel);
+                }
+            }
         }
     }
+}
+
+fn branch_letter(index: usize) -> char {
+    char::from(b'A' + (index as u8))
+}
+
+fn stereo_in_name(channel: u32) -> String {
+    if channel == 0 {
+        "L In".into()
+    } else {
+        "R In".into()
+    }
+}
+
+fn stereo_out_name(channel: u32) -> String {
+    if channel == 0 {
+        "L Out".into()
+    } else {
+        "R Out".into()
+    }
+}
+
+fn stereo_in_branch_name(strip: usize, channel: u32) -> String {
+    let side = if channel % 2 == 0 { "L" } else { "R" };
+    format!("{side} In {}", branch_letter(strip))
+}
+
+fn stereo_out_branch_name(branch: usize, channel: u32) -> String {
+    let side = if channel % 2 == 0 { "L" } else { "R" };
+    format!("{side} Out {}", branch_letter(branch))
 }
 
 fn default_vst3_format() -> String {
@@ -810,6 +917,138 @@ impl AudioGraph {
             .ok_or(GraphError::PortNotFound)?;
         self.connect(from, from_port, to, to_port)
     }
+
+    /// Left-to-right layered layout following signal flow.
+    ///
+    /// Sources sit in the leftmost column; the master output is always on the
+    /// right. Nodes in later columns align vertically with their upstream
+    /// connections when there is room.
+    pub fn arranged_positions(
+        &self,
+        size_of: impl Fn(&GraphNode) -> [f32; 2],
+    ) -> IndexMap<NodeId, [f32; 2]> {
+        const ORIGIN_X: f32 = 40.0;
+        const ORIGIN_Y: f32 = 40.0;
+        const COL_GAP: f32 = 80.0;
+        const ROW_GAP: f32 = 36.0;
+        const MIN_COL_WIDTH: f32 = 140.0;
+
+        let mut result = IndexMap::new();
+        if self.nodes.is_empty() {
+            return result;
+        }
+
+        let order = self
+            .topological_order()
+            .unwrap_or_else(|_| self.nodes.keys().copied().collect());
+
+        let mut rank: IndexMap<NodeId, u32> = IndexMap::new();
+        for id in &order {
+            let r = self
+                .edges
+                .values()
+                .filter(|e| e.to_node == *id)
+                .filter_map(|e| rank.get(&e.from_node).copied())
+                .max()
+                .map(|m| m + 1)
+                .unwrap_or(0);
+            rank.insert(*id, r);
+        }
+        for id in self.nodes.keys() {
+            rank.entry(*id).or_insert(0);
+        }
+
+        let max_other = self
+            .nodes
+            .iter()
+            .filter(|(_, n)| !matches!(n.kind, NodeKind::MasterOutput))
+            .filter_map(|(id, _)| rank.get(id).copied())
+            .max()
+            .unwrap_or(0);
+        for (id, n) in &self.nodes {
+            if matches!(n.kind, NodeKind::MasterOutput) {
+                rank.insert(*id, max_other.saturating_add(1));
+            }
+        }
+
+        let max_rank = rank.values().copied().max().unwrap_or(0);
+        let n_cols = max_rank as usize + 1;
+        let mut col_width = vec![MIN_COL_WIDTH; n_cols];
+        for (id, r) in &rank {
+            if let Some(node) = self.nodes.get(id) {
+                let i = *r as usize;
+                col_width[i] = col_width[i].max(size_of(node)[0]);
+            }
+        }
+        let mut col_x = vec![ORIGIN_X; n_cols];
+        for i in 1..n_cols {
+            col_x[i] = col_x[i - 1] + col_width[i - 1] + COL_GAP;
+        }
+
+        for r in 0..=max_rank {
+            // (id, desired_y, height, source_out_idx, dest_in_idx)
+            let mut layer: Vec<(NodeId, f32, f32, u32, u32)> = rank
+                .iter()
+                .filter(|(_, rr)| **rr == r)
+                .filter_map(|(id, _)| {
+                    let node = self.nodes.get(id)?;
+                    let height = size_of(node)[1];
+                    let mut source_out_idx = u32::MAX;
+                    let mut dest_in_idx = u32::MAX;
+                    let mut pred_ys = Vec::new();
+                    for edge in self.edges.values().filter(|e| e.to_node == *id) {
+                        let Some(from) = self.nodes.get(&edge.from_node) else {
+                            continue;
+                        };
+                        let Some(&from_pos) = result.get(&edge.from_node) else {
+                            continue;
+                        };
+                        let out_i = from
+                            .outputs
+                            .iter()
+                            .position(|p| p.id == edge.from_port)
+                            .unwrap_or(0) as u32;
+                        let in_i = node
+                            .inputs
+                            .iter()
+                            .position(|p| p.id == edge.to_port)
+                            .unwrap_or(0) as u32;
+                        source_out_idx = source_out_idx.min(out_i);
+                        dest_in_idx = dest_in_idx.min(in_i);
+                        pred_ys.push(from_pos[1]);
+                    }
+                    let desired_y = if pred_ys.is_empty() {
+                        node.position[1]
+                    } else {
+                        pred_ys.iter().sum::<f32>() / pred_ys.len() as f32
+                    };
+                    Some((*id, desired_y, height, source_out_idx, dest_in_idx))
+                })
+                .collect();
+
+            // Fan-out order first (splitter A above B), then mixer strip order,
+            // then geometric Y — keeps wires from crossing.
+            layer.sort_by(|a, b| {
+                a.3.cmp(&b.3)
+                    .then_with(|| a.4.cmp(&b.4))
+                    .then_with(|| {
+                        a.1.partial_cmp(&b.1)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    })
+                    .then_with(|| a.0.as_uuid().cmp(&b.0.as_uuid()))
+            });
+
+            let x = col_x[r as usize];
+            let mut y_cursor = ORIGIN_Y;
+            for (id, want, h, _, _) in layer {
+                let y = if r == 0 { y_cursor } else { want.max(y_cursor) };
+                result.insert(id, [x, y]);
+                y_cursor = y + h + ROW_GAP;
+            }
+        }
+
+        result
+    }
 }
 
 /// Immutable compiled plan safe to swap onto the audio thread.
@@ -999,7 +1238,10 @@ mod tests {
         assert!(matches!(node.kind, NodeKind::SumMixer { .. }));
         node.migrate_ports();
         assert_eq!(node.inputs.len(), MIXER_STRIP_COUNT * 2);
-        assert_eq!(node.inputs[0].name, "In1 L");
+        assert_eq!(node.inputs[0].name, "L In A");
+        assert_eq!(node.inputs[1].name, "R In A");
+        assert_eq!(node.outputs[0].name, "L Out");
+        assert_eq!(node.outputs[1].name, "R Out");
         // Original port IDs preserved on strip 1.
         assert_eq!(
             node.inputs[0].id.to_string(),
@@ -1025,5 +1267,83 @@ mod tests {
         assert!(plan.order.contains(&source));
         assert!(plan.order.contains(&master));
         assert!(!plan.order.contains(&floating));
+    }
+
+    #[test]
+    fn arranged_positions_flow_left_to_right() {
+        let mut g = AudioGraph::new();
+        let mut src = GraphNode::midi_clip_source(TrackId::new(), "MIDI");
+        src.position = [400.0, 80.0];
+        let mut synth = GraphNode::builtin_synth("Synth");
+        synth.position = [10.0, 10.0];
+        let mut gain = GraphNode::stereo_gain_pan("Gain");
+        gain.position = [50.0, 500.0];
+        let mut master = GraphNode::master_output();
+        master.position = [0.0, 0.0];
+
+        let src_id = g.add_node(src);
+        let synth_id = g.add_node(synth);
+        let gain_id = g.add_node(gain);
+        let master_id = g.add_node(master);
+        g.connect_midi(src_id, synth_id).unwrap();
+        g.connect_stereo(synth_id, gain_id).unwrap();
+        g.connect_stereo(gain_id, master_id).unwrap();
+
+        let pos = g.arranged_positions(|_| [140.0, 56.0]);
+        assert!(pos[&src_id][0] < pos[&synth_id][0]);
+        assert!(pos[&synth_id][0] < pos[&gain_id][0]);
+        assert!(pos[&gain_id][0] < pos[&master_id][0]);
+        let ys = [pos[&src_id][1], pos[&synth_id][1], pos[&gain_id][1]];
+        let spread = ys.iter().copied().fold(f32::MIN, f32::max)
+            - ys.iter().copied().fold(f32::MAX, f32::min);
+        assert!(
+            spread < 1.0,
+            "serial chain should stay aligned, spread={spread}"
+        );
+    }
+
+    #[test]
+    fn arranged_positions_respects_splitter_port_order() {
+        let mut g = AudioGraph::new();
+        let src = g.add_node(GraphNode::midi_clip_source(TrackId::new(), "MIDI Out"));
+        let split = g.add_node(GraphNode::midi_splitter("Split"));
+        // Intentionally place "A" target below "B" target before organising.
+        let mut a_inst = GraphNode::builtin_synth("MIDI In A");
+        a_inst.position = [0.0, 400.0];
+        let mut b_inst = GraphNode::builtin_synth("MIDI In B");
+        b_inst.position = [0.0, 0.0];
+        let a_id = g.add_node(a_inst);
+        let b_id = g.add_node(b_inst);
+        let mut mixer = GraphNode::sum_mixer("Bus");
+        mixer.position = [0.0, 200.0];
+        let mix_id = g.add_node(mixer);
+        let master = g.add_node(GraphNode::master_output());
+
+        g.connect_midi(src, split).unwrap();
+        // Split A → bottom-placed synth, Split B → top-placed synth (crossed).
+        g.connect_midi(split, a_id).unwrap();
+        let split_b = g.nodes[&split].outputs[1].id;
+        let b_midi = g.nodes[&b_id].inputs[0].id;
+        g.connect(split, split_b, b_id, b_midi).unwrap();
+        // Crossed into mixer strips too: A → In2, B → In1.
+        let a_l = g.nodes[&a_id].outputs[0].id;
+        let a_r = g.nodes[&a_id].outputs[1].id;
+        let b_l = g.nodes[&b_id].outputs[0].id;
+        let b_r = g.nodes[&b_id].outputs[1].id;
+        let in1_l = g.nodes[&mix_id].inputs[0].id;
+        let in1_r = g.nodes[&mix_id].inputs[1].id;
+        let in2_l = g.nodes[&mix_id].inputs[2].id;
+        let in2_r = g.nodes[&mix_id].inputs[3].id;
+        g.connect(a_id, a_l, mix_id, in2_l).unwrap();
+        g.connect(a_id, a_r, mix_id, in2_r).unwrap();
+        g.connect(b_id, b_l, mix_id, in1_l).unwrap();
+        g.connect(b_id, b_r, mix_id, in1_r).unwrap();
+        g.connect_stereo(mix_id, master).unwrap();
+
+        let pos = g.arranged_positions(|_| [140.0, 56.0]);
+        assert!(
+            pos[&a_id][1] < pos[&b_id][1],
+            "split A target should sit above split B target"
+        );
     }
 }

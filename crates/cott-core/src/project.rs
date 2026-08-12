@@ -841,11 +841,13 @@ mod tests {
         assert_eq!(project.graph.nodes.len(), nodes_before + 1);
         let track_ref = project.tracks.iter().find(|t| t.id == track).unwrap();
         assert_eq!(track_ref.instrument_node, Some(attached_id));
-        assert!(!project
-            .graph
-            .edges
-            .values()
-            .any(|e| e.from_node == floating_id || e.to_node == floating_id));
+        assert!(
+            !project
+                .graph
+                .edges
+                .values()
+                .any(|e| e.from_node == floating_id || e.to_node == floating_id)
+        );
     }
 
     #[test]

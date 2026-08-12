@@ -99,6 +99,11 @@ pub enum Command {
         instrument_track: Option<TrackId>,
         plugin_state: Option<PluginStateBlob>,
     },
+    /// Reposition routing-graph nodes (auto-organise). UI-only; no DSP change.
+    MoveNodes {
+        before: Vec<(NodeId, [f32; 2])>,
+        after: Vec<(NodeId, [f32; 2])>,
+    },
     SetTempo {
         old_bpm: f64,
         new_bpm: f64,
@@ -490,6 +495,14 @@ fn apply(project: &mut Project, cmd: &Command, reverse: bool) {
                 }
                 if let Some(blob) = plugin_state {
                     project.plugin_states.shift_remove(&blob.instance_id);
+                }
+            }
+        }
+        Command::MoveNodes { before, after } => {
+            let source = if reverse { before } else { after };
+            for (id, pos) in source {
+                if let Some(node) = project.graph.nodes.get_mut(id) {
+                    node.position = *pos;
                 }
             }
         }
@@ -894,5 +907,27 @@ mod tests {
             Some(node_id)
         );
         assert!(project.graph.nodes.contains_key(&node_id));
+    }
+
+    #[test]
+    fn undo_redo_move_nodes() {
+        let mut project = Project::new("t");
+        let mut node = crate::graph::GraphNode::stereo_gain_pan("Gain");
+        node.position = [10.0, 20.0];
+        let id = node.id;
+        project.graph.add_node(node);
+        let mut stack = CommandStack::default();
+        stack.push(
+            &mut project,
+            Command::MoveNodes {
+                before: vec![(id, [10.0, 20.0])],
+                after: vec![(id, [200.0, 80.0])],
+            },
+        );
+        assert_eq!(project.graph.nodes[&id].position, [200.0, 80.0]);
+        assert!(stack.undo(&mut project));
+        assert_eq!(project.graph.nodes[&id].position, [10.0, 20.0]);
+        assert!(stack.redo(&mut project));
+        assert_eq!(project.graph.nodes[&id].position, [200.0, 80.0]);
     }
 }

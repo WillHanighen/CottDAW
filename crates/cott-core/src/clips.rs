@@ -315,7 +315,9 @@ fn humanize_factor(note_id: NoteId, salt: u64) -> f64 {
     let bytes = uuid.as_bytes();
     let mut h = salt;
     for &b in bytes.iter() {
-        h = h.wrapping_mul(0x9e37_79b9_7f4a_7c15).wrapping_add(u64::from(b));
+        h = h
+            .wrapping_mul(0x9e37_79b9_7f4a_7c15)
+            .wrapping_add(u64::from(b));
     }
     // Map full u64 range into [0, 1), then to [-1, 1).
     let u = (h as f64) / (u64::MAX as f64);

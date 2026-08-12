@@ -468,9 +468,8 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
                         app.preview_note(track_id, pitch);
                     }
                 } else if vel_lane.contains(pos) {
-                    let (ctrl, shift) = ui.input(|i| {
-                        (i.modifiers.command || i.modifiers.ctrl, i.modifiers.shift)
-                    });
+                    let (ctrl, shift) =
+                        ui.input(|i| (i.modifiers.command || i.modifiers.ctrl, i.modifiers.shift));
                     start_velocity_drag(
                         app, clip_id, &notes, &grid, &vel_lane, pos, track_id, beat_w, ctrl, shift,
                     );
@@ -813,10 +812,8 @@ fn paint_note(
         painter.rect_filled(nrect, 2.0, fill);
         // Velocity fill from the bottom of the note body.
         let vel_h = (nrect.height() * t).max(2.0);
-        let vel_rect = egui::Rect::from_min_max(
-            egui::pos2(nrect.left(), nrect.bottom() - vel_h),
-            nrect.max,
-        );
+        let vel_rect =
+            egui::Rect::from_min_max(egui::pos2(nrect.left(), nrect.bottom() - vel_h), nrect.max);
         painter.rect_filled(
             vel_rect,
             2.0,
@@ -899,7 +896,9 @@ fn paint_velocity_lane(
 
 fn velocity_bar_rect(lane: egui::Rect, note: &MidiNote, beat_w: f32) -> Option<egui::Rect> {
     let x = lane.left() + note.start_beats as f32 * beat_w;
-    let w = (note.length_beats as f32 * beat_w).max(4.0).min(beat_w * 0.9);
+    let w = (note.length_beats as f32 * beat_w)
+        .max(4.0)
+        .min(beat_w * 0.9);
     if x > lane.right() || x + w < lane.left() {
         return None;
     }
@@ -1178,11 +1177,7 @@ fn notes_on_same_beat(notes: &[MidiNote], start_beats: f64) -> Vec<MidiNote> {
         .collect()
 }
 
-fn sync_selection_to_notes(
-    app: &mut CottApp,
-    clip_id: cott_core::ids::ClipId,
-    notes: &[MidiNote],
-) {
+fn sync_selection_to_notes(app: &mut CottApp, clip_id: cott_core::ids::ClipId, notes: &[MidiNote]) {
     app.ui.selected_notes = notes.iter().map(|n| n.id).collect();
     app.ui.selected_notes_clip = if app.ui.selected_notes.is_empty() {
         None
@@ -1420,11 +1415,7 @@ fn clamp_move_deltas(
         pitch_delta = pitch_delta.max(-(note.pitch as i16));
         pitch_delta = pitch_delta.min(127 - note.pitch as i16);
     }
-    if let Some(min_start) = before
-        .iter()
-        .map(|n| n.start_beats)
-        .reduce(f64::min)
-    {
+    if let Some(min_start) = before.iter().map(|n| n.start_beats).reduce(f64::min) {
         start_delta = start_delta.max(-min_start);
     }
     if let Some(max_delta) = before
@@ -1601,12 +1592,18 @@ mod tests {
     fn chord_stamp_uses_selected_chord_intervals() {
         assert_eq!(chord_pitches(60, ChordKind::Minor), vec![60, 63, 67]);
         assert_eq!(chord_pitches(60, ChordKind::Major7), vec![60, 64, 67, 71]);
-        assert_eq!(chord_pitches(60, ChordKind::Diminished7), vec![60, 63, 66, 69]);
+        assert_eq!(
+            chord_pitches(60, ChordKind::Diminished7),
+            vec![60, 63, 66, 69]
+        );
         assert_eq!(
             chord_pitches(60, ChordKind::HalfDiminished),
             vec![60, 63, 66, 70]
         );
-        assert_eq!(chord_pitches(60, ChordKind::Major9), vec![60, 64, 67, 71, 74]);
+        assert_eq!(
+            chord_pitches(60, ChordKind::Major9),
+            vec![60, 64, 67, 71, 74]
+        );
         assert_eq!(chord_pitches(60, ChordKind::Add9), vec![60, 64, 67, 74]);
         assert_eq!(chord_pitches(60, ChordKind::Power), vec![60, 67]);
     }

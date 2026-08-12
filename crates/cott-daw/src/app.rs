@@ -510,7 +510,10 @@ impl CottApp {
 
     pub fn import_audio(&mut self) {
         let Some(path) = rfd::FileDialog::new()
-            .add_filter("Audio", &["wav", "flac", "ogg", "opus", "mp3", "aiff", "m4a"])
+            .add_filter(
+                "Audio",
+                &["wav", "flac", "ogg", "opus", "mp3", "aiff", "m4a"],
+            )
             .pick_file()
         else {
             return;
@@ -613,7 +616,7 @@ impl CottApp {
     /// Load baked-in CottSynth VST3 on a MIDI track (fallback: in-process node).
     pub fn attach_default_cott_synth(&mut self, track_id: TrackId, open_editor: bool) {
         use crate::builtin_synth::{
-            cott_synth_descriptor, resolve_cott_synth_vst3, COTT_SYNTH_NAME,
+            COTT_SYNTH_NAME, cott_synth_descriptor, resolve_cott_synth_vst3,
         };
 
         let Some(path) = resolve_cott_synth_vst3() else {

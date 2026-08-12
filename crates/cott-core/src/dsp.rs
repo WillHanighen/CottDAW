@@ -382,13 +382,11 @@ pub fn process_block(
                         let r = i * 2 + 1;
                         if l < input.channel_count() {
                             let len = frames.min(input.channels[l].len());
-                            strip_buf.channels[0][..len]
-                                .copy_from_slice(&input.channels[l][..len]);
+                            strip_buf.channels[0][..len].copy_from_slice(&input.channels[l][..len]);
                         }
                         if r < input.channel_count() {
                             let len = frames.min(input.channels[r].len());
-                            strip_buf.channels[1][..len]
-                                .copy_from_slice(&input.channels[r][..len]);
+                            strip_buf.channels[1][..len].copy_from_slice(&input.channels[r][..len]);
                         }
                         strip_buf.apply_gain(gain_db_to_linear(strip.gain_db));
                         strip_buf.apply_pan_stereo(strip.pan);

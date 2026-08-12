@@ -1,7 +1,7 @@
 //! Floating egui editors for built-in routing nodes (gain, mixer, splitter, synth).
 
 use crate::app::CottApp;
-use cott_core::graph::{MixerStrip, NodeKind, SplitterBranch, MIXER_STRIP_COUNT};
+use cott_core::graph::{MIXER_STRIP_COUNT, MixerStrip, NodeKind, SplitterBranch};
 use cott_core::ids::NodeId;
 use eframe::egui::{self, RichText};
 
@@ -53,9 +53,7 @@ pub fn draw(app: &mut CottApp, ctx: &egui::Context) {
                     *master_pan,
                     *mute,
                 ),
-                NodeKind::StereoSplitter { a, b } => {
-                    draw_splitter_editor(app, ui, node_id, *a, *b)
-                }
+                NodeKind::StereoSplitter { a, b } => draw_splitter_editor(app, ui, node_id, *a, *b),
                 NodeKind::BuiltinSynth { params } => {
                     super::draw_builtin_synth_inspector(app, ui, node_id, *params)
                 }
@@ -290,15 +288,16 @@ fn apply_gain_pan(
     *s = solo;
     // Prefer command stack when only gain/pan/mute change (solo is live-only here).
     if old.3 == solo {
-        app.commands.record(cott_core::commands::Command::SetGainPan {
-            node_id,
-            old_gain: old.0,
-            new_gain: *g,
-            old_pan: old.1,
-            new_pan: *p,
-            old_mute: old.2,
-            new_mute: *m,
-        });
+        app.commands
+            .record(cott_core::commands::Command::SetGainPan {
+                node_id,
+                old_gain: old.0,
+                new_gain: *g,
+                old_pan: old.1,
+                new_pan: *p,
+                old_mute: old.2,
+                new_mute: *m,
+            });
     }
     app.project.touch();
     app.sync_engine();

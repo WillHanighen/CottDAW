@@ -128,6 +128,13 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
             app.ui.graph_pan = egui::Vec2::ZERO;
             app.ui.graph_zoom = 1.0;
         }
+        if ui
+            .button("Auto-organise")
+            .on_hover_text("Arrange nodes left-to-right by signal flow (undoable)")
+            .clicked()
+        {
+            organise_graph(app);
+        }
     });
 
     // Drag identity is stored on CottApp so it survives frame-to-frame id churn.
@@ -245,9 +252,9 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
             Some(PortType::Midi) => egui::Color32::from_rgb(220, 180, 80),
             _ => egui::Color32::from_rgb(80, 180, 220),
         };
-        painter.line_segment([a, b], egui::Stroke::new(2.0, color));
+        draw_wire(&painter, a, b, egui::Stroke::new(2.0_f32, color), zoom);
         if let Some(pos) = pointer {
-            if distance_to_segment(pos, a, b) < 8.0 {
+            if distance_to_wire(pos, a, b, zoom) < 8.0 {
                 edge_hit = Some(edge.id);
             }
         }
@@ -277,7 +284,13 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
                     to_node.position[0],
                     to_node.position[1] + 28.0 + to_idx as f32 * 14.0,
                 );
-                painter.line_segment([a, b], egui::Stroke::new(3.0, egui::Color32::WHITE));
+                draw_wire(
+                    &painter,
+                    a,
+                    b,
+                    egui::Stroke::new(3.0_f32, egui::Color32::WHITE),
+                    zoom,
+                );
             }
         }
     }
@@ -320,7 +333,6 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
 
         let port_r = (5.0 * zoom).clamp(3.0, 12.0);
         let label_font = egui::FontId::proportional((10.0 * zoom).clamp(7.0, 16.0));
-        let show_port_labels = node.inputs.len() > 2 || node.outputs.len() > 2;
         for (i, port) in node.inputs.iter().enumerate() {
             let p = world_to_screen(node.position[0], node.position[1] + 28.0 + i as f32 * 14.0);
             port_positions.insert((node_id, port.id), p);
@@ -329,15 +341,13 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
                 PortType::Audio => egui::Color32::from_rgb(80, 180, 220),
             };
             painter.circle_filled(p, port_r, color);
-            if show_port_labels {
-                painter.text(
-                    p + egui::vec2(8.0 * zoom, 0.0),
-                    egui::Align2::LEFT_CENTER,
-                    &port.name,
-                    label_font.clone(),
-                    egui::Color32::from_rgb(180, 190, 200),
-                );
-            }
+            painter.text(
+                p + egui::vec2(8.0 * zoom, 0.0),
+                egui::Align2::LEFT_CENTER,
+                &port.name,
+                label_font.clone(),
+                egui::Color32::from_rgb(180, 190, 200),
+            );
         }
         for (i, port) in node.outputs.iter().enumerate() {
             let p = world_to_screen(
@@ -350,15 +360,13 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
                 PortType::Audio => egui::Color32::from_rgb(80, 180, 220),
             };
             painter.circle_filled(p, port_r, color);
-            if show_port_labels {
-                painter.text(
-                    p - egui::vec2(8.0 * zoom, 0.0),
-                    egui::Align2::RIGHT_CENTER,
-                    &port.name,
-                    label_font.clone(),
-                    egui::Color32::from_rgb(180, 190, 200),
-                );
-            }
+            painter.text(
+                p - egui::vec2(8.0 * zoom, 0.0),
+                egui::Align2::RIGHT_CENTER,
+                &port.name,
+                label_font.clone(),
+                egui::Color32::from_rgb(180, 190, 200),
+            );
         }
     }
 
@@ -425,8 +433,13 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
                 .or_else(|| ui.ctx().pointer_latest_pos());
             if let Some(pos) = tip {
                 if let Some(start) = port_positions.get(&(from_node, from_port)) {
-                    painter
-                        .line_segment([*start, pos], egui::Stroke::new(2.0, egui::Color32::YELLOW));
+                    draw_wire(
+                        &painter,
+                        *start,
+                        pos,
+                        egui::Stroke::new(2.0_f32, egui::Color32::YELLOW),
+                        zoom,
+                    );
                 }
             }
         }
@@ -782,12 +795,105 @@ fn set_zoom_percent_at(app: &mut CottApp, screen_pos: egui::Pos2, percent: i32) 
 }
 
 fn node_body_width(node: &cott_core::graph::GraphNode) -> f32 {
-    let labeled = node.inputs.len() > 2 || node.outputs.len() > 2;
-    if labeled {
-        168.0
-    } else {
-        140.0
+    let _ = node;
+    // Room for labels like "MIDI Out A" / "L In A".
+    176.0
+}
+
+fn node_visual_height(node: &cott_core::graph::GraphNode) -> f32 {
+    let ports = node.inputs.len().max(node.outputs.len()).max(1);
+    56.0 + (ports as f32 - 1.0) * 14.0
+}
+
+fn organise_graph(app: &mut CottApp) {
+    let laid_out = app
+        .project
+        .graph
+        .arranged_positions(|n| [node_body_width(n), node_visual_height(n)]);
+    if laid_out.is_empty() {
+        return;
     }
+
+    let n = laid_out.len() as f32;
+    let mut old_c = [0.0_f32, 0.0];
+    let mut new_c = [0.0_f32, 0.0];
+    for (id, new_pos) in &laid_out {
+        let Some(node) = app.project.graph.nodes.get(id) else {
+            continue;
+        };
+        old_c[0] += node.position[0];
+        old_c[1] += node.position[1];
+        new_c[0] += new_pos[0];
+        new_c[1] += new_pos[1];
+    }
+    old_c[0] /= n;
+    old_c[1] /= n;
+    new_c[0] /= n;
+    new_c[1] /= n;
+    let dx = old_c[0] - new_c[0];
+    let dy = old_c[1] - new_c[1];
+
+    let mut before = Vec::new();
+    let mut after = Vec::new();
+    for (id, pos) in laid_out {
+        let Some(node) = app.project.graph.nodes.get(&id) else {
+            continue;
+        };
+        let new_pos = [pos[0] + dx, pos[1] + dy];
+        if (node.position[0] - new_pos[0]).abs() > 0.5
+            || (node.position[1] - new_pos[1]).abs() > 0.5
+        {
+            before.push((id, node.position));
+            after.push((id, new_pos));
+        }
+    }
+    if after.is_empty() {
+        app.status = "Graph already organised".into();
+        return;
+    }
+    app.commands.push(
+        &mut app.project,
+        cott_core::commands::Command::MoveNodes { before, after },
+    );
+    app.status = "Graph organised".into();
+}
+
+/// Cubic Bézier with horizontal handles — same construction as Blender's shader editor.
+fn wire_bezier(a: egui::Pos2, b: egui::Pos2, zoom: f32) -> egui::epaint::CubicBezierShape {
+    let dist = a.distance(b);
+    let handle = (dist * 0.5).max(24.0 * zoom);
+    egui::epaint::CubicBezierShape::from_points_stroke(
+        [
+            a,
+            egui::pos2(a.x + handle, a.y),
+            egui::pos2(b.x - handle, b.y),
+            b,
+        ],
+        false,
+        egui::Color32::TRANSPARENT,
+        egui::Stroke::NONE,
+    )
+}
+
+fn draw_wire(
+    painter: &egui::Painter,
+    a: egui::Pos2,
+    b: egui::Pos2,
+    stroke: egui::Stroke,
+    zoom: f32,
+) {
+    let mut bezier = wire_bezier(a, b, zoom);
+    bezier.stroke = stroke.into();
+    painter.add(bezier);
+}
+
+fn distance_to_wire(p: egui::Pos2, a: egui::Pos2, b: egui::Pos2, zoom: f32) -> f32 {
+    let pts = wire_bezier(a, b, zoom).flatten(Some(6.0));
+    let mut best = f32::MAX;
+    for pair in pts.windows(2) {
+        best = best.min(distance_to_segment(p, pair[0], pair[1]));
+    }
+    best
 }
 
 fn node_has_plugin_editor(graph: &cott_core::graph::AudioGraph, node_id: NodeId) -> bool {

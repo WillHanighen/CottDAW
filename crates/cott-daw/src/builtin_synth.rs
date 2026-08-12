@@ -60,7 +60,12 @@ fn bundle_looks_valid(path: &Path) -> bool {
         && (path.join("Contents").is_dir()
             || path
                 .read_dir()
-                .map(|mut d| d.any(|e| e.map(|e| e.path().extension() == Some("so".as_ref())).unwrap_or(false)))
+                .map(|mut d| {
+                    d.any(|e| {
+                        e.map(|e| e.path().extension() == Some("so".as_ref()))
+                            .unwrap_or(false)
+                    })
+                })
                 .unwrap_or(false))
 }
 
@@ -106,4 +111,3 @@ pub fn inject_cott_synth(catalog: &mut Vec<PluginDescriptor>) {
     info!("baked-in CottSynth at {}", path.display());
     catalog.insert(0, desc);
 }
-
