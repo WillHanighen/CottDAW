@@ -4,6 +4,7 @@ mod app;
 mod audio;
 mod builtin_filter;
 mod builtin_synth;
+mod builtin_whistle;
 mod plugins;
 mod ui;
 

@@ -20,6 +20,11 @@ crates/cott-daw/           # GUI binary `cott-daw`
 crates/cott-vst-worker/    # worker binary `cott-vst-worker`
 crates/cott-synth-dsp/     # CottSynth DSP (built-in + VST3)
 crates/cott-synth/         # CottSynth VST3 cdylib
+crates/cott-filter-dsp/    # CottFilter biquad DSP + response probe
+crates/cott-filter/        # CottFilter VST3 cdylib
+crates/cott-whistle-dsp/   # CottWhistle mono pulse/saw G-funk lead DSP (no sine)
+crates/cott-whistle/       # CottWhistle VST3 cdylib
+crates/cott-plugin-ui/     # shared skeuomorphic egui panel kit for the VST3s
 crates/cott-xtask/         # nih-plug bundler entry
 vendor/truce-rack-vst3/    # patched VST3 host bindings
 docs/                      # this documentation
@@ -34,17 +39,19 @@ Default member is `cott-daw`.
 ./scripts/build-daw.sh
 ./scripts/build-daw.sh release
 
-# Or manually:
-cargo bundle-synth-debug && cargo build -p cott-daw -p cott-vst-worker
-cargo bundle-synth && cargo build --release -p cott-daw -p cott-vst-worker
+# Or manually (one alias per first-party plugin):
+cargo bundle-synth-debug && cargo bundle-filter-debug && cargo bundle-whistle-debug \
+  && cargo build -p cott-daw -p cott-vst-worker
+cargo bundle-synth && cargo bundle-filter && cargo bundle-whistle \
+  && cargo build --release -p cott-daw -p cott-vst-worker
 ```
 
-The DAW always lists CottSynth in the browser and loads `target/bundled/cott-synth.vst3` through the worker. Bundle before building `cott-daw` so `build.rs` can embed the absolute path.
+The DAW always lists CottSynth, CottFilter, and CottWhistle in the browser and loads the bundles under `target/bundled/` through the worker. Bundle before building `cott-daw` so `build.rs` can embed the absolute paths.
 
-Install the same bundle for other hosts with:
+Install the same bundles for other hosts with:
 
 ```bash
-cp -a target/bundled/cott-synth.vst3 ~/.vst3/
+cp -a target/bundled/cott-{synth,filter,whistle}.vst3 ~/.vst3/
 ```
 
 The host resolves the worker binary as:
@@ -71,6 +78,18 @@ cargo test -p cott-core --lib
 
 # Compile host + worker (smoke that the workspace links)
 cargo build -p cott-daw -p cott-vst-worker
+
+# CottWhistle: engine behaviour, glide, stability, spectra, and the VST3 wrapper
+cargo test -p cott-whistle-dsp -p cott-whistle
+cargo check -p cott-whistle && cargo bundle-whistle-debug
+```
+
+`cott-whistle-dsp` tests cover voice priority and legato, monotonic portamento, sample-accurate MIDI offsets, finite bounded output at 44.1/48/96 kHz, and spectral assertions: every character carries real upper harmonics (none of them resemble a sine), `Worm` shows its 1/14-pulse resonator tilt, the four characters differ from each other, and high notes stay alias-controlled. `cargo run -p cott-whistle-dsp --example audition` prints per-character partial profiles and output levels when retuning by ear.
+
+To open the whistle editor standalone, point the worker at the **bundle directory** (not the inner `.so`, which the scanner cannot resolve):
+
+```bash
+RUST_LOG=info ./target/debug/cott-vst-worker --probe-editor "$PWD/target/bundled/cott-whistle.vst3"
 ```
 
 There is no fake in-process plugin path anymore; plugin IPC is exercised against real `cott-vst-worker` builds when testing by hand.
@@ -83,9 +102,16 @@ Useful `cott-core` areas covered by unit tests include tempo/sample conversion, 
 |---------|------------|
 | Project `.ctgdaw` archives / tracks / default wiring | `cott-core/src/project.rs`, `archive.rs`, `clips.rs` |
 | Graph validation & compile / PDC | `cott-core/src/graph.rs` |
+| Routing canvas layout (columns, auto-arrange) | `cott-core/src/graph.rs` (`layout`, `arranged_positions`), `cott-daw/src/ui/graph_editor.rs` |
 | Block DSP | `cott-core/src/dsp.rs` |
 | CottSynth voices / waveforms / ADSR | `cott-synth-dsp` |
 | CottSynth VST3 wrapper | `cott-synth` |
+| CottFilter biquad + response curve | `cott-filter-dsp` |
+| CottWhistle oscillators / ladder / resonators / voice | `cott-whistle-dsp/src/{oscillator,filter,engine}.rs` |
+| CottWhistle character recipes (routing + defaults) | `cott-whistle-dsp/src/character.rs` |
+| CottWhistle `v3-` parameters and panel | `cott-whistle/src/lib.rs` |
+| Plugin panel look (chassis, knobs, wells) | `cott-plugin-ui` |
+| First-party plugin catalog entries | `cott-daw/src/builtin_{synth,filter,whistle}.rs` |
 | Engine commands & offline render | `cott-core/src/engine.rs` |
 | Undoable edits | `cott-core/src/commands.rs` |
 | Export formats | `cott-core/src/export.rs`, `visualizers/` |
@@ -123,10 +149,16 @@ For yabridge: catalog scan defers VST2/VST3/CLAP wrappers so it does not spawn W
 
 `PROJECT_VERSION = 2` in `cott-core/src/project.rs`. Version 1 VST3 node names deserialize through aliases and default to the VST3 format. Loading a newer version than the binary supports is an error.
 
+Plugin state lives in opaque VST3 blobs and is versioned per plugin, not by `PROJECT_VERSION`. CottWhistle's rebuild kept its class ID but moved every parameter to a `v3-` ID, so earlier whistle blobs match nothing and those instances load the new defaults. Use the same trick — new IDs, same class ID — when a plugin's controls change so much that migrating the old values would produce a wrong patch instead of a missing one.
+
 ## Style notes
 
 - Prefer reversible `commands` for user-visible mutations.
 - Keep graph edits validated before swapping `CompiledPlan`.
+- The routing canvas re-arranges itself whenever a project opens, until the user
+  positions a node by hand (`AudioGraph::user_arranged`). Node geometry changes
+  therefore need no migration — set the sizes in `graph::layout` and old
+  projects lay themselves out again.
 - Do not load plugin `.so` code inside `cott-daw`.
 - Stereo (`MAX_CHANNELS = 2`) is assumed end-to-end today.
 

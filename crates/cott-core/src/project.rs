@@ -2,7 +2,7 @@
 
 use crate::automation::AutomationLane;
 use crate::clips::{Clip, ClipContent, Track, TrackKind};
-use crate::graph::{AudioGraph, CompiledPlan, GraphNode, NodeKind};
+use crate::graph::{self, AudioGraph, CompiledPlan, GraphNode, NodeKind};
 use crate::ids::{AssetId, NodeId, PluginInstanceId, TrackId};
 use crate::time::{TempoMap, TransportState};
 use indexmap::IndexMap;
@@ -139,15 +139,16 @@ impl Project {
     pub fn add_midi_track(&mut self, name: impl Into<String>) -> TrackId {
         let name = name.into();
         let mut track = Track::new_midi(&name);
-        let y = self.tracks.len() as f32 * 100.0;
+        let y = graph::layout::row_y(self.tracks.len());
 
         let midi_src = GraphNode::midi_clip_source(track.id, format!("{name} MIDI"));
         let mut midi_src = midi_src;
-        midi_src.position = [40.0, y];
+        midi_src.position = [graph::layout::column_x(0), y];
         let midi_id = midi_src.id;
 
         let mut gain = GraphNode::stereo_gain_pan(format!("{name} Gain"));
-        gain.position = [360.0, y];
+        // Column 1 is the instrument slot for MIDI tracks.
+        gain.position = [graph::layout::column_x(2), y];
         let gain_id = gain.id;
 
         track.midi_source_node = Some(midi_id);
@@ -183,7 +184,7 @@ impl Project {
         }
 
         let mut synth = GraphNode::builtin_synth("CottSynth");
-        synth.position = [200.0, y];
+        synth.position = [graph::layout::column_x(1), y];
         let synth_id = synth.id;
         self.graph.edges.retain(|_, e| e.from_node != midi_src);
         self.graph.add_node(synth);
@@ -200,14 +201,14 @@ impl Project {
     pub fn add_audio_track(&mut self, name: impl Into<String>) -> TrackId {
         let name = name.into();
         let mut track = Track::new_audio(&name);
-        let y = self.tracks.len() as f32 * 100.0;
+        let y = graph::layout::row_y(self.tracks.len());
 
         let mut audio_src = GraphNode::audio_clip_source(track.id, format!("{name} Audio"));
-        audio_src.position = [40.0, y];
+        audio_src.position = [graph::layout::column_x(0), y];
         let audio_id = audio_src.id;
 
         let mut gain = GraphNode::stereo_gain_pan(format!("{name} Gain"));
-        gain.position = [360.0, y];
+        gain.position = [graph::layout::column_x(2), y];
         let gain_id = gain.id;
 
         track.audio_source_node = Some(audio_id);
@@ -309,7 +310,7 @@ impl Project {
             plugin_path,
             plugin_name,
         );
-        inst.position = [200.0, y];
+        inst.position = [graph::layout::column_x(1), y];
         let inst_id = inst.id;
         // Drop only edges leaving the MIDI source (re-route through the new instrument).
         self.graph.edges.retain(|_, e| e.from_node != midi_src);

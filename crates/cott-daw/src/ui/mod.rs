@@ -2,7 +2,7 @@
 
 mod arrangement;
 mod export_dialog;
-mod graph_editor;
+pub mod graph_editor;
 mod node_editors;
 mod piano_roll;
 pub mod scale;

@@ -9,6 +9,9 @@ members = [
     "crates/cott-synth",
     "crates/cott-filter-dsp",
     "crates/cott-filter",
+    "crates/cott-whistle-dsp",
+    "crates/cott-whistle",
+    "crates/cott-plugin-ui",
     "crates/cott-xtask",
 ]
 default-members = ["crates/cott-daw"]
@@ -24,6 +27,12 @@ cott-core = { path = "crates/cott-core" }
 cott-ipc = { path = "crates/cott-ipc" }
 cott-synth-dsp = { path = "crates/cott-synth-dsp" }
 cott-filter-dsp = { path = "crates/cott-filter-dsp" }
+cott-whistle-dsp = { path = "crates/cott-whistle-dsp" }
+cott-plugin-ui = { path = "crates/cott-plugin-ui" }
+
+# Pinned in one place so every first-party plugin links the same egui/nih-plug.
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", default-features = false, features = ["vst3"] }
+nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug.git" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

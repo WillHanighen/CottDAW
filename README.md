@@ -9,7 +9,7 @@ Arrangement timeline, piano-roll MIDI editing, an authoritative acyclic audio/MI
 - Arrangement timeline with MIDI and audio tracks
 - Piano-roll MIDI editing with note audition
 - Authoritative acyclic audio/MIDI routing graph (cycles rejected)
-- Built-in **CottSynth** + **CottFilter** VST3s (always in the browser; synth default on MIDI tracks)
+- Built-in **CottSynth**, **CottFilter**, and **CottWhistle** VST3s (always in the browser; synth default on MIDI tracks)
 - Built-in gain/pan/mute, summing, and master bus
 - Sandboxed VST2, VST3, CLAP, and LV2 hosting (one worker process per plugin)
 - yabridge support for Windows VST2, VST3, and CLAP plugins
@@ -17,7 +17,7 @@ Arrangement timeline, piano-roll MIDI editing, an authoritative acyclic audio/MI
 - Undo / redo
 - Project `.ctgdaw` save/load with periodic autosave
 - Offline export to WAV, Ogg Opus, or Gonio MP4 (via `ffmpeg`)
-- Redistributable CottSynth / CottFilter VST3s (`cargo bundle-synth`, `cargo bundle-filter`)
+- Redistributable CottSynth / CottFilter / CottWhistle VST3s (`cargo bundle-synth`, `cargo bundle-filter`, `cargo bundle-whistle`)
 
 ## Documentation
 
@@ -49,7 +49,7 @@ For Windows plugins, install Wine Staging and yabridge, register the Windows plu
 
 ```bash
 ./scripts/build-daw.sh
-# or: cargo bundle-synth-debug && cargo bundle-filter-debug && cargo build -p cott-daw -p cott-vst-worker
+# or: cargo bundle-synth-debug && cargo bundle-filter-debug && cargo bundle-whistle-debug && cargo build -p cott-daw -p cott-vst-worker
 ```
 
 Both binaries land in `target/debug/`. The DAW looks for `cott-vst-worker` next to itself (or under `target/debug|release/`). Bundle the first-party VSTs so they show up in the browser.
@@ -59,10 +59,28 @@ Both binaries land in `target/debug/`. The DAW looks for `cott-vst-worker` next 
 ```bash
 cargo bundle-synth          # → target/bundled/cott-synth.vst3
 cargo bundle-filter         # → target/bundled/cott-filter.vst3
-# debug: bundle-synth-debug / bundle-filter-debug
+cargo bundle-whistle        # → target/bundled/cott-whistle.vst3
+# debug: bundle-synth-debug / bundle-filter-debug / bundle-whistle-debug
 ```
 
-Copy those bundles into `~/.vst3/` (or another host’s VST3 path) to use them outside CottDAW. The DAW injects them into the plugin browser automatically (CottSynth = default MIDI instrument; CottFilter = stereo LP/HP effect).
+Copy those bundles into `~/.vst3/` (or another host’s VST3 path) to use them outside CottDAW. The DAW injects them into the plugin browser automatically (CottSynth = default MIDI instrument; CottFilter = stereo LP/HP effect; CottWhistle = monophonic G-funk whistle lead).
+
+### CottWhistle
+
+The "whistle" is a nickname for a filtered, harmonically rich analog lead, **not** a sine oscillator — there is no sine anywhere in the instrument. Every character builds its tone from a narrow pulse, a stepped saw, or a square, then shapes it through a four-pole ladder low-pass and a bank of parallel band-pass resonators. One monophonic voice with last-note priority, legato (no envelope retrigger on overlap), and exponential portamento does the rest.
+
+Four characters set the circuit routing and a calibrated set of defaults, which the shared macro knobs then adjust:
+
+| Character | Circuit | Inspired by |
+|-----------|---------|-------------|
+| **Worm** | 1/14 pulse → reed resonator bank → VCF | ARP Pro Soloist "Oboe", *Funky Worm* |
+| **West Coast** | 2' saw + detuned square → ladder | Minimoog G-funk leads |
+| **Silk** | saw-led, soft resonator body | smoother mid-90s leads |
+| **San Andreas** | narrow pulse, tight glide, brighter | game-theme-style lead |
+
+Controls: character, glide, octave, pulse/saw blend, detune, brilliance, emphasis, body, vibrato rate/depth/delay, attack, release, drive, output. Unison and chorus are gone; the single centered voice is sent to both channels so the output stays mono-compatible.
+
+**State reset:** the plugin keeps its name and VST3 class ID (`CottWhstlVST3CE!`) so existing projects still resolve it, but every parameter now uses a `v3-` ID. Earlier whistle state no longer matches any parameter and is ignored — those instances come back with the new defaults rather than a half-mapped patch.
 
 ## Run
 
@@ -95,6 +113,8 @@ cott-vst-worker  (one process per plugin instance)
 - **`cott-core`** — project model, typed DAG, DSP graph compiler, offline render (includes built-in CottSynth)
 - **`cott-synth-dsp` / `cott-synth`** — shared synth engine + redistributable VST3
 - **`cott-filter-dsp` / `cott-filter`** — stereo LP/HP biquad + redistributable VST3
+- **`cott-whistle-dsp` / `cott-whistle`** — monophonic pulse/saw G-funk lead (ladder + resonators, four characters) + redistributable VST3
+- **`cott-plugin-ui`** — shared skeuomorphic panel kit used by all three plugin editors
 - **`cott-ipc`** — length-prefixed bincode protocol + shared-memory audio/MIDI ring
 - Plugin crashes kill only the worker; the DAW silences/bypasses that node and keeps transport running
 
@@ -103,6 +123,10 @@ cott-vst-worker  (one process per plugin instance)
 ```bash
 cargo test -p cott-core --lib
 cargo build -p cott-daw -p cott-vst-worker
+
+# CottWhistle: DSP behaviour + spectra, then the plugin wrapper
+cargo test -p cott-whistle-dsp -p cott-whistle
+cargo run -p cott-whistle-dsp --example audition   # per-character partials and levels
 ```
 
 ## Limitations

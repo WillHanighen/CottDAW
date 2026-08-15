@@ -6,3 +6,6 @@ bundle-synth-debug = "run -p cott-xtask -- bundle cott-synth"
 # CottFilter (stereo LP/HP effect).
 bundle-filter = "run -p cott-xtask --release -- bundle cott-filter --release"
 bundle-filter-debug = "run -p cott-xtask -- bundle cott-filter"
+# CottWhistle (G-funk whistle lead instrument).
+bundle-whistle = "run -p cott-xtask --release -- bundle cott-whistle --release"
+bundle-whistle-debug = "run -p cott-xtask -- bundle cott-whistle"

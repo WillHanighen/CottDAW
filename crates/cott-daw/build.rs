@@ -20,6 +20,10 @@ fn main() {
     println!("cargo:rerun-if-changed=../cott-filter/src");
     println!("cargo:rerun-if-changed=../cott-filter/Cargo.toml");
     println!("cargo:rerun-if-changed=../cott-filter-dsp/src");
+    println!("cargo:rerun-if-changed=../cott-whistle/src");
+    println!("cargo:rerun-if-changed=../cott-whistle/Cargo.toml");
+    println!("cargo:rerun-if-changed=../cott-whistle-dsp/src");
+    println!("cargo:rerun-if-changed=../cott-plugin-ui/src");
     println!("cargo:rerun-if-changed=../cott-xtask/src");
 
     let synth = workspace.join("target/bundled/cott-synth.vst3");
@@ -39,6 +43,16 @@ fn main() {
     } else {
         println!(
             "cargo:warning=CottFilter.vst3 not bundled yet — run `cargo bundle-filter` (or `cargo build-daw`)"
+        );
+    }
+
+    let whistle = workspace.join("target/bundled/cott-whistle.vst3");
+    println!("cargo:rerun-if-changed={}", whistle.display());
+    if whistle.is_dir() {
+        println!("cargo:rustc-env=COTT_WHISTLE_VST3={}", whistle.display());
+    } else {
+        println!(
+            "cargo:warning=CottWhistle.vst3 not bundled yet — run `cargo bundle-whistle` (or `cargo build-daw`)"
         );
     }
 }

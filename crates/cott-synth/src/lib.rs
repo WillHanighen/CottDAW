@@ -1,22 +1,33 @@
 //! CottSynth VST3 — polyphonic multi-waveform synth with ADSR + egui editor.
 //!
-//! Same DSP as the optional in-process DAW fallback (`cott-synth-dsp`).
+//! Same DSP as the optional in-process DAW fallback (`cott-synth-dsp`); the
+//! panel is built from the shared `cott-plugin-ui` hardware kit.
 
+use std::sync::Arc;
+
+use cott_plugin_ui::{
+    begin_panel, layout, paint_curve, paint_envelope, paint_header, paint_plate, paint_well,
+    param_knob, param_knob_enabled, plate_legend,
+    scope::{paint_waveform, ScopeBuffer, SCOPE_LEN},
+    segment_button, Skin,
+};
 use cott_synth_dsp::{MidiNoteEvent, PolySynth, Waveform, MAX_VOICES};
+use nih_plug::formatters;
 use nih_plug::prelude::*;
 use nih_plug_egui::{
     create_egui_editor,
-    egui::{self, Color32, FontId, RichText, ScrollArea, Stroke, Vec2},
+    egui::{self, Align2, FontId, Vec2},
     resizable_window::ResizableWindow,
     EguiState,
 };
-use std::ops::RangeInclusive;
-use std::sync::Arc;
+
+const SKIN: Skin = Skin::teal();
 
 struct CottSynth {
     params: Arc<CottSynthParams>,
     engine: PolySynth,
     events: Vec<MidiNoteEvent>,
+    scope: Arc<ScopeBuffer>,
 }
 
 #[derive(Enum, Debug, Clone, Copy, PartialEq)]
@@ -107,6 +118,7 @@ impl Default for CottSynth {
             params: Arc::new(CottSynthParams::default()),
             engine: PolySynth::new(48_000.0),
             events: Vec::with_capacity(64),
+            scope: Arc::new(ScopeBuffer::new()),
         }
     }
 }
@@ -114,7 +126,7 @@ impl Default for CottSynth {
 impl Default for CottSynthParams {
     fn default() -> Self {
         Self {
-            editor_state: EguiState::from_size(440, 520),
+            editor_state: EguiState::from_size(620, 500),
             waveform: EnumParam::new("Waveform", WaveParam::Sine),
             attack_ms: FloatParam::new(
                 "Attack",
@@ -126,7 +138,8 @@ impl Default for CottSynthParams {
                 },
             )
             .with_step_size(0.1)
-            .with_unit(" ms"),
+            .with_unit(" ms")
+            .with_value_to_string(formatters::v2s_f32_rounded(0)),
             decay_ms: FloatParam::new(
                 "Decay",
                 100.0,
@@ -137,9 +150,13 @@ impl Default for CottSynthParams {
                 },
             )
             .with_step_size(0.1)
-            .with_unit(" ms"),
+            .with_unit(" ms")
+            .with_value_to_string(formatters::v2s_f32_rounded(0)),
             sustain: FloatParam::new("Sustain", 0.7, FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_step_size(0.01),
+                .with_step_size(0.01)
+                .with_unit(" %")
+                .with_value_to_string(formatters::v2s_f32_percentage(0))
+                .with_string_to_value(formatters::s2v_f32_percentage()),
             release_ms: FloatParam::new(
                 "Release",
                 200.0,
@@ -150,7 +167,8 @@ impl Default for CottSynthParams {
                 },
             )
             .with_step_size(0.1)
-            .with_unit(" ms"),
+            .with_unit(" ms")
+            .with_value_to_string(formatters::v2s_f32_rounded(0)),
             pulse_width: FloatParam::new(
                 "Pulse Width",
                 0.25,
@@ -159,9 +177,15 @@ impl Default for CottSynthParams {
                     max: 0.95,
                 },
             )
-            .with_step_size(0.01),
+            .with_step_size(0.01)
+            .with_unit(" %")
+            .with_value_to_string(formatters::v2s_f32_percentage(0))
+            .with_string_to_value(formatters::s2v_f32_percentage()),
             gain: FloatParam::new("Gain", 0.25, FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_step_size(0.01),
+                .with_step_size(0.01)
+                .with_unit(" %")
+                .with_value_to_string(formatters::v2s_f32_percentage(0))
+                .with_string_to_value(formatters::s2v_f32_percentage()),
         }
     }
 }
@@ -195,128 +219,21 @@ impl Plugin for CottSynth {
     fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
         let params = self.params.clone();
         let egui_state = self.params.editor_state.clone();
+        let scope = self.scope.clone();
+
         create_egui_editor(
             self.params.editor_state.clone(),
             (),
-            |ctx, _| {
-                let mut visuals = egui::Visuals::dark();
-                visuals.panel_fill = Color32::from_rgb(22, 24, 28);
-                visuals.window_fill = Color32::from_rgb(22, 24, 28);
-                visuals.extreme_bg_color = Color32::from_rgb(22, 24, 28);
-                visuals.override_text_color = Some(Color32::from_rgb(230, 228, 220));
-                visuals.widgets.inactive.bg_fill = Color32::from_rgb(40, 44, 52);
-                visuals.widgets.hovered.bg_fill = Color32::from_rgb(55, 62, 74);
-                visuals.widgets.active.bg_fill = Color32::from_rgb(70, 110, 130);
-                visuals.selection.bg_fill = Color32::from_rgb(70, 130, 140);
-                ctx.set_visuals(visuals);
-            },
+            |ctx, _| cott_plugin_ui::apply_visuals(ctx, &SKIN),
             move |egui_ctx, setter, _state| {
+                egui_ctx.request_repaint();
+                // Keep this below any size a host (or a persisted editor state
+                // from an older build) might hand us — a larger minimum makes
+                // egui push the panel off the left edge of the window.
                 ResizableWindow::new("cott_synth_resize")
-                    .min_size(Vec2::new(320.0, 280.0))
+                    .min_size(Vec2::new(380.0, 330.0))
                     .show(egui_ctx, egui_state.as_ref(), |ui| {
-                        // Fill any area beyond the scroll content (avoids white flash).
-                        let full = ui.max_rect();
-                        ui.painter()
-                            .rect_filled(full, 0.0, Color32::from_rgb(22, 24, 28));
-
-                        ScrollArea::vertical()
-                            .auto_shrink([false, false])
-                            .show(ui, |ui| {
-                                ui.set_min_width(ui.available_width());
-                                ui.add_space(8.0);
-                                ui.label(
-                                    RichText::new("CottSynth")
-                                        .font(FontId::proportional(26.0))
-                                        .color(Color32::from_rgb(180, 220, 210)),
-                                );
-                                ui.label(
-                                    RichText::new(format!("{MAX_VOICES}-voice · Cottage"))
-                                        .size(12.0)
-                                        .color(Color32::from_rgb(140, 148, 160)),
-                                );
-                                ui.add_space(10.0);
-                                ui.separator();
-                                ui.add_space(8.0);
-
-                                ui.label(RichText::new("Oscillator").strong());
-                                ui.add_space(4.0);
-                                ui.horizontal(|ui| {
-                                    ui.label("Wave");
-                                    let current = params.waveform.value();
-                                    egui::ComboBox::from_id_salt("cott_synth_wave")
-                                        .selected_text(current.label())
-                                        .width(220.0)
-                                        .show_ui(ui, |ui| {
-                                            for wave in WaveParam::ALL {
-                                                let selected = current == wave;
-                                                if ui.selectable_label(selected, wave.label()).clicked()
-                                                    && !selected
-                                                {
-                                                    setter.begin_set_parameter(&params.waveform);
-                                                    setter.set_parameter(&params.waveform, wave);
-                                                    setter.end_set_parameter(&params.waveform);
-                                                }
-                                            }
-                                        });
-                                });
-
-                                let wave = params.waveform.value().to_waveform();
-                                let pw = params.pulse_width.value();
-                                draw_waveform_preview(ui, wave, pw);
-                                ui.add_space(6.0);
-
-                                if matches!(wave, Waveform::Pulse) {
-                                    float_param_row(
-                                        ui,
-                                        setter,
-                                        "Pulse",
-                                        &params.pulse_width,
-                                        0.05..=0.95,
-                                        "",
-                                    );
-                                }
-
-                                ui.add_space(10.0);
-                                ui.label(RichText::new("Envelope (ADSR)").strong());
-                                ui.add_space(4.0);
-                                float_param_row(
-                                    ui,
-                                    setter,
-                                    "Attack",
-                                    &params.attack_ms,
-                                    0.0..=2000.0,
-                                    " ms",
-                                );
-                                float_param_row(
-                                    ui,
-                                    setter,
-                                    "Decay",
-                                    &params.decay_ms,
-                                    0.0..=2000.0,
-                                    " ms",
-                                );
-                                float_param_row(
-                                    ui,
-                                    setter,
-                                    "Sustain",
-                                    &params.sustain,
-                                    0.0..=1.0,
-                                    "",
-                                );
-                                float_param_row(
-                                    ui,
-                                    setter,
-                                    "Release",
-                                    &params.release_ms,
-                                    0.0..=5000.0,
-                                    " ms",
-                                );
-
-                                ui.add_space(10.0);
-                                ui.label(RichText::new("Output").strong());
-                                float_param_row(ui, setter, "Gain", &params.gain, 0.0..=1.0, "");
-                                ui.add_space(16.0);
-                            });
+                        draw_panel(ui, setter, &params, &scope);
                     });
             },
         )
@@ -398,100 +315,148 @@ impl Plugin for CottSynth {
             let (left, right) = slices.split_at_mut(1);
             self.engine
                 .process_block(&params, &self.events, left[0], right[0]);
+            self.scope.push(left[0]);
         } else if let Some(mono) = slices.first_mut() {
             let mut right = mono.to_vec();
             self.engine
                 .process_block(&params, &self.events, mono, &mut right);
+            self.scope.push(mono);
         }
 
         ProcessStatus::Normal
     }
 }
 
-/// Slider with a single automation gesture for the whole drag.
-///
-/// While the host is processing audio, nih-plug does not update `param.value()`
-/// from GUI writes until the host echoes `performEdit` through `process()`.
-/// Re-binding egui's slider to `param.value()` every frame therefore snaps the
-/// widget back to the old/default value mid-drag. Keep a local value in egui
-/// memory for the duration of the interaction.
-fn float_param_row(
+fn draw_panel(
     ui: &mut egui::Ui,
     setter: &ParamSetter,
-    label: &str,
-    param: &FloatParam,
-    range: RangeInclusive<f32>,
-    suffix: &str,
+    params: &CottSynthParams,
+    scope: &ScopeBuffer,
 ) {
-    ui.horizontal(|ui| {
-        ui.allocate_ui_with_layout(
-            Vec2::new(64.0, 20.0),
-            egui::Layout::left_to_right(egui::Align::Center),
-            |ui| {
-                ui.label(label);
-            },
-        );
-        let id = ui.id().with(param.name()).with("cott_synth_slider");
-        let mut value = ui
-            .ctx()
-            .data(|d| d.get_temp::<f32>(id))
-            .unwrap_or_else(|| param.value());
-        let mut slider = egui::Slider::new(&mut value, range).clamping(egui::SliderClamping::Always);
-        if !suffix.is_empty() {
-            slider = slider.suffix(suffix);
-        }
-        let response = ui.add(slider);
-        if response.drag_started() {
-            setter.begin_set_parameter(param);
-        }
-        if response.changed() {
-            if !response.dragged() && !response.drag_started() {
-                setter.begin_set_parameter(param);
-                setter.set_parameter(param, value);
-                setter.end_set_parameter(param);
-            } else {
-                setter.set_parameter(param, value);
-            }
-        }
-        if response.drag_stopped() {
-            setter.end_set_parameter(param);
-            ui.ctx().data_mut(|d| d.remove::<f32>(id));
-        } else if response.dragged() || response.changed() {
-            ui.ctx().data_mut(|d| d.insert_temp(id, value));
-        } else {
-            // Idle: follow the processor/host value.
-            ui.ctx().data_mut(|d| d.remove::<f32>(id));
-        }
-    });
-}
-
-fn draw_waveform_preview(ui: &mut egui::Ui, wave: Waveform, pulse_width: f32) {
-    let (rect, _response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 56.0), egui::Sense::hover());
-    let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 4.0, Color32::from_rgb(14, 16, 20));
-    painter.rect_stroke(
-        rect,
-        4.0,
-        Stroke::new(1.0, Color32::from_rgb(50, 56, 66)),
-        egui::StrokeKind::Outside,
+    let content = begin_panel(ui, &SKIN);
+    let (header, rest) = layout::split_top(content, 46.0, 10.0);
+    paint_header(
+        ui.painter(),
+        header,
+        &SKIN,
+        "CottSynth",
+        &format!("{MAX_VOICES}-Voice Poly"),
+        scope.level(),
     );
 
+    let (osc_rect, rest) = layout::split_top(rest, rest.height() * 0.34, 10.0);
+    let (env_rect, out_rect) = layout::split_top(rest, rest.height() * 0.52, 10.0);
+
+    draw_oscillator(ui, setter, params, osc_rect);
+    draw_envelope(ui, setter, params, env_rect);
+    draw_output(ui, setter, params, scope, out_rect);
+}
+
+fn draw_oscillator(
+    ui: &mut egui::Ui,
+    setter: &ParamSetter,
+    params: &CottSynthParams,
+    rect: egui::Rect,
+) {
+    let inner = paint_plate(ui.painter(), rect, &SKIN);
+    let inner = plate_legend(ui.painter(), inner, &SKIN, "Oscillator");
+
+    let (buttons, tail) = layout::split_left(inner, inner.width() * 0.40, 10.0);
+    let (preview, pw_cell) = layout::split_left(tail, tail.width() * 0.62, 10.0);
+
+    // Waveform selector: two columns of latching caps.
+    let current = params.waveform.value();
+    let cols = layout::columns(buttons, 2, 6.0);
+    for (col_idx, col) in cols.iter().enumerate() {
+        let cells = layout::rows(*col, 3, 5.0);
+        for (row_idx, cell) in cells.iter().enumerate() {
+            let Some(wave) = WaveParam::ALL.get(col_idx * 3 + row_idx).copied() else {
+                continue;
+            };
+            let selected = wave == current;
+            let key = format!("wave_{}", wave.label());
+            if segment_button(ui, *cell, &SKIN, &key, wave.label(), selected).clicked() && !selected
+            {
+                setter.begin_set_parameter(&params.waveform);
+                setter.set_parameter(&params.waveform, wave);
+                setter.end_set_parameter(&params.waveform);
+            }
+        }
+    }
+
+    // One cycle of the selected wave.
+    let well = paint_well(ui.painter(), preview, &SKIN);
+    let wave = current.to_waveform();
+    let pulse_width = params.pulse_width.value();
     let mut noise = 0xC0FF_EE42u32;
-    let n = 128;
-    let mut points = Vec::with_capacity(n);
-    for i in 0..n {
-        let phase = i as f32 / n as f32;
-        let sample = cott_synth_dsp::sample_waveform(wave, phase, pulse_width, &mut noise);
-        let x = rect.left() + 6.0 + (rect.width() - 12.0) * phase;
-        let y = rect.center().y - sample * (rect.height() * 0.35);
-        points.push(egui::pos2(x, y));
-    }
-    for w in points.windows(2) {
-        painter.line_segment(
-            [w[0], w[1]],
-            Stroke::new(1.5, Color32::from_rgb(120, 200, 180)),
-        );
-    }
+    paint_curve(ui.painter(), well, &SKIN, 160, |t| {
+        let sample = cott_synth_dsp::sample_waveform(wave, t, pulse_width, &mut noise);
+        0.5 + sample * 0.42
+    });
+    ui.painter().text(
+        well.left_bottom() + Vec2::new(3.0, -2.0),
+        Align2::LEFT_BOTTOM,
+        cott_plugin_ui::spaced(current.label()),
+        FontId::monospace(8.5),
+        cott_plugin_ui::with_alpha(SKIN.legend_dim, 180),
+    );
+
+    param_knob_enabled(
+        ui,
+        pw_cell,
+        &SKIN,
+        setter,
+        &params.pulse_width,
+        "Width",
+        matches!(wave, Waveform::Pulse),
+    );
+}
+
+fn draw_envelope(
+    ui: &mut egui::Ui,
+    setter: &ParamSetter,
+    params: &CottSynthParams,
+    rect: egui::Rect,
+) {
+    let inner = paint_plate(ui.painter(), rect, &SKIN);
+    let inner = plate_legend(ui.painter(), inner, &SKIN, "Envelope");
+    let (knobs, graph) = layout::split_left(inner, inner.width() * 0.56, 10.0);
+
+    let cells = layout::columns(knobs, 4, 6.0);
+    param_knob(ui, cells[0], &SKIN, setter, &params.attack_ms, "Attack");
+    param_knob(ui, cells[1], &SKIN, setter, &params.decay_ms, "Decay");
+    param_knob(ui, cells[2], &SKIN, setter, &params.sustain, "Sustain");
+    param_knob(ui, cells[3], &SKIN, setter, &params.release_ms, "Release");
+
+    let well = paint_well(ui.painter(), graph, &SKIN);
+    paint_envelope(
+        ui.painter(),
+        well,
+        &SKIN,
+        params.attack_ms.value() * 0.001,
+        params.decay_ms.value() * 0.001,
+        params.sustain.value(),
+        params.release_ms.value() * 0.001,
+    );
+}
+
+fn draw_output(
+    ui: &mut egui::Ui,
+    setter: &ParamSetter,
+    params: &CottSynthParams,
+    scope: &ScopeBuffer,
+    rect: egui::Rect,
+) {
+    let inner = paint_plate(ui.painter(), rect, &SKIN);
+    let inner = plate_legend(ui.painter(), inner, &SKIN, "Output");
+    let (gain_cell, trace) = layout::split_left(inner, 78.0f32.min(inner.width() * 0.3), 10.0);
+
+    param_knob(ui, gain_cell, &SKIN, setter, &params.gain, "Gain");
+
+    let well = paint_well(ui.painter(), trace, &SKIN);
+    let mut samples = [0.0f32; SCOPE_LEN];
+    scope.snapshot(&mut samples);
+    paint_waveform(ui.painter(), well, &SKIN, &samples);
 }
 
 impl Vst3Plugin for CottSynth {

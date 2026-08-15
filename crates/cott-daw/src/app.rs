@@ -108,6 +108,9 @@ impl CottApp {
         {
             app.attach_default_cott_synth(track_id, false);
         }
+        app.project
+            .graph
+            .auto_arrange_if_untouched(crate::ui::graph_editor::node_size);
         app.sync_engine();
         // Never block window creation on VST scan (yabridge/Wine can take minutes).
         app.start_plugin_scan();
@@ -341,6 +344,11 @@ impl CottApp {
         self.project_path = archive_path;
         self.workspace = Some(workspace);
         self.commands = CommandStack::default();
+        // Graphs nobody has hand-arranged are laid out for the node sizes of
+        // *this* build, so an older project never opens on top of itself.
+        self.project
+            .graph
+            .auto_arrange_if_untouched(crate::ui::graph_editor::node_size);
         let sr = self
             .audio
             .as_ref()

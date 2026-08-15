@@ -55,6 +55,7 @@ impl PluginHost {
         let mut catalog = Vec::new();
         crate::builtin_synth::inject_cott_synth(&mut catalog);
         crate::builtin_filter::inject_cott_filter(&mut catalog);
+        crate::builtin_whistle::inject_cott_whistle(&mut catalog);
         Self {
             catalog,
             instances: IndexMap::new(),
@@ -67,6 +68,7 @@ impl PluginHost {
     pub fn set_catalog_from_scan(&mut self, mut catalog: Vec<PluginDescriptor>) {
         crate::builtin_synth::inject_cott_synth(&mut catalog);
         crate::builtin_filter::inject_cott_filter(&mut catalog);
+        crate::builtin_whistle::inject_cott_whistle(&mut catalog);
         self.catalog = catalog;
     }
 

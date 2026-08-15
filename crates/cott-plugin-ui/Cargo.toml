@@ -1,0 +1,11 @@
+[package]
+name = "cott-plugin-ui"
+version.workspace = true
+edition = "2021"
+license.workspace = true
+authors.workspace = true
+description = "Shared skeuomorphic egui panel kit for the Cottage VST3 plugins"
+
+[dependencies]
+nih_plug = { workspace = true }
+nih_plug_egui = { workspace = true }

@@ -948,6 +948,7 @@ name = "cott-filter"
 version = "0.1.0"
 dependencies = [
  "cott-filter-dsp",
+ "cott-plugin-ui",
  "nih_plug",
  "nih_plug_egui",
 ]
@@ -975,9 +976,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "cott-plugin-ui"
+version = "0.1.0"
+dependencies = [
+ "nih_plug",
+ "nih_plug_egui",
+]
+
+[[package]]
 name = "cott-synth"
 version = "0.1.0"
 dependencies = [
+ "cott-plugin-ui",
  "cott-synth-dsp",
  "nih_plug",
  "nih_plug_egui",
@@ -1013,6 +1023,23 @@ dependencies = [
  "vst",
  "vst3",
  "x11-dl",
+]
+
+[[package]]
+name = "cott-whistle"
+version = "0.1.0"
+dependencies = [
+ "cott-plugin-ui",
+ "cott-whistle-dsp",
+ "nih_plug",
+ "nih_plug_egui",
+]
+
+[[package]]
+name = "cott-whistle-dsp"
+version = "0.1.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

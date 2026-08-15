@@ -32,12 +32,12 @@ impl Default for FilterParams {
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-struct BiquadCoeffs {
-    b0: f32,
-    b1: f32,
-    b2: f32,
-    a1: f32,
-    a2: f32,
+pub(crate) struct BiquadCoeffs {
+    pub(crate) b0: f32,
+    pub(crate) b1: f32,
+    pub(crate) b2: f32,
+    pub(crate) a1: f32,
+    pub(crate) a2: f32,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -137,7 +137,12 @@ impl StereoFilter {
     }
 }
 
-fn design_biquad(mode: FilterMode, cutoff_hz: f32, q: f32, sample_rate: f32) -> BiquadCoeffs {
+pub(crate) fn design_biquad(
+    mode: FilterMode,
+    cutoff_hz: f32,
+    q: f32,
+    sample_rate: f32,
+) -> BiquadCoeffs {
     let w0 = std::f32::consts::TAU * (cutoff_hz / sample_rate);
     let cos_w0 = w0.cos();
     let sin_w0 = w0.sin();

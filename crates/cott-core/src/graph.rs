@@ -349,7 +349,7 @@ impl GraphNode {
             kind: NodeKind::MasterOutput,
             inputs: vec![Port::audio_in(stereo_in_name(0), 0), Port::audio_in(stereo_in_name(1), 1)],
             outputs: vec![],
-            position: [600.0, 100.0],
+            position: [layout::column_x(3), layout::ORIGIN_Y],
             latency_samples: 0,
         }
     }
@@ -687,10 +687,40 @@ pub enum GraphError {
     DuplicateEdge,
 }
 
+/// Geometry of the routing editor's left-to-right layout.
+///
+/// Shared so that nodes spawned before the editor has ever drawn (new tracks,
+/// attached instruments) land on the same grid the auto-arrange uses.
+pub mod layout {
+    /// Drawn width of a node body in the routing editor.
+    pub const NODE_WIDTH: f32 = 176.0;
+    pub const ORIGIN_X: f32 = 40.0;
+    pub const ORIGIN_Y: f32 = 40.0;
+    pub const COL_GAP: f32 = 80.0;
+    pub const ROW_GAP: f32 = 36.0;
+    pub const MIN_COL_WIDTH: f32 = 140.0;
+    /// Vertical pitch between tracks when nothing has measured the nodes yet.
+    pub const ROW_PITCH: f32 = 112.0;
+
+    /// Left edge of signal-flow column `col` (0 = sources).
+    pub fn column_x(col: usize) -> f32 {
+        ORIGIN_X + col as f32 * (NODE_WIDTH + COL_GAP)
+    }
+
+    /// Top edge of track row `row`.
+    pub fn row_y(row: usize) -> f32 {
+        ORIGIN_Y + row as f32 * ROW_PITCH
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AudioGraph {
     pub nodes: IndexMap<NodeId, GraphNode>,
     pub edges: IndexMap<EdgeId, GraphEdge>,
+    /// Set once the user positions a node by hand. Until then the editor is
+    /// free to lay the graph out itself when a project is opened.
+    #[serde(default)]
+    pub user_arranged: bool,
 }
 
 impl AudioGraph {
@@ -918,6 +948,34 @@ impl AudioGraph {
         self.connect(from, from_port, to, to_port)
     }
 
+    /// Lay the graph out unless the user has arranged it themselves.
+    ///
+    /// Called when a project is opened, so a graph nobody has touched always
+    /// comes up readable — node sizes change between releases, and stored
+    /// positions from an older build would otherwise overlap.
+    pub fn auto_arrange_if_untouched(&mut self, size_of: impl Fn(&GraphNode) -> [f32; 2]) -> bool {
+        if self.user_arranged {
+            return false;
+        }
+        self.apply_arrangement(size_of)
+    }
+
+    /// Move every node onto the computed layout. Returns whether anything moved.
+    pub fn apply_arrangement(&mut self, size_of: impl Fn(&GraphNode) -> [f32; 2]) -> bool {
+        let laid_out = self.arranged_positions(size_of);
+        let mut moved = false;
+        for (id, pos) in laid_out {
+            if let Some(node) = self.nodes.get_mut(&id)
+                && ((node.position[0] - pos[0]).abs() > 0.5
+                    || (node.position[1] - pos[1]).abs() > 0.5)
+            {
+                node.position = pos;
+                moved = true;
+            }
+        }
+        moved
+    }
+
     /// Left-to-right layered layout following signal flow.
     ///
     /// Sources sit in the leftmost column; the master output is always on the
@@ -927,11 +985,7 @@ impl AudioGraph {
         &self,
         size_of: impl Fn(&GraphNode) -> [f32; 2],
     ) -> IndexMap<NodeId, [f32; 2]> {
-        const ORIGIN_X: f32 = 40.0;
-        const ORIGIN_Y: f32 = 40.0;
-        const COL_GAP: f32 = 80.0;
-        const ROW_GAP: f32 = 36.0;
-        const MIN_COL_WIDTH: f32 = 140.0;
+        use layout::{COL_GAP, MIN_COL_WIDTH, ORIGIN_X, ORIGIN_Y, ROW_GAP};
 
         let mut result = IndexMap::new();
         if self.nodes.is_empty() {
@@ -1345,5 +1399,86 @@ mod tests {
             pos[&a_id][1] < pos[&b_id][1],
             "split A target should sit above split B target"
         );
+    }
+
+    /// Node footprint used by the routing editor.
+    fn editor_size(node: &GraphNode) -> [f32; 2] {
+        let ports = node.inputs.len().max(node.outputs.len()).max(1);
+        [layout::NODE_WIDTH, 56.0 + (ports as f32 - 1.0) * 14.0]
+    }
+
+    fn overlapping_pair(g: &AudioGraph) -> Option<(String, String)> {
+        let nodes: Vec<_> = g.nodes.values().collect();
+        for (i, a) in nodes.iter().enumerate() {
+            for b in nodes.iter().skip(i + 1) {
+                let (sa, sb) = (editor_size(a), editor_size(b));
+                let overlap_x = a.position[0] < b.position[0] + sb[0]
+                    && b.position[0] < a.position[0] + sa[0];
+                let overlap_y = a.position[1] < b.position[1] + sb[1]
+                    && b.position[1] < a.position[1] + sa[1];
+                if overlap_x && overlap_y {
+                    return Some((a.name.clone(), b.name.clone()));
+                }
+            }
+        }
+        None
+    }
+
+    fn typical_session() -> AudioGraph {
+        let mut g = AudioGraph::new();
+        let src = g.add_node(GraphNode::midi_clip_source(TrackId::new(), "MIDI 1 MIDI"));
+        let synth = g.add_node(GraphNode::builtin_synth("CottSynth"));
+        let gain = g.add_node(GraphNode::stereo_gain_pan("MIDI 1 Gain"));
+        let audio = g.add_node(GraphNode::audio_clip_source(TrackId::new(), "Audio 1"));
+        let audio_gain = g.add_node(GraphNode::stereo_gain_pan("Audio 1 Gain"));
+        let master = g.add_node(GraphNode::master_output());
+        g.connect_midi(src, synth).unwrap();
+        g.connect_stereo(synth, gain).unwrap();
+        g.connect_stereo(gain, master).unwrap();
+        g.connect_stereo(audio, audio_gain).unwrap();
+        g.connect_stereo(audio_gain, master).unwrap();
+        g
+    }
+
+    #[test]
+    fn untouched_graphs_are_laid_out_without_overlaps() {
+        let mut g = typical_session();
+        // Positions from an older build, when nodes were drawn narrower.
+        for (i, node) in g.nodes.values_mut().enumerate() {
+            node.position = [40.0 + (i % 3) as f32 * 160.0, (i / 3) as f32 * 100.0];
+        }
+        assert!(overlapping_pair(&g).is_some(), "test setup should overlap");
+
+        assert!(g.auto_arrange_if_untouched(editor_size));
+        assert_eq!(
+            overlapping_pair(&g),
+            None,
+            "auto-arrange left nodes on top of each other"
+        );
+    }
+
+    #[test]
+    fn a_hand_arranged_graph_is_left_alone() {
+        let mut g = typical_session();
+        let before: Vec<_> = g.nodes.values().map(|n| n.position).collect();
+        g.user_arranged = true;
+
+        assert!(!g.auto_arrange_if_untouched(editor_size));
+        let after: Vec<_> = g.nodes.values().map(|n| n.position).collect();
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn user_arranged_survives_a_save_and_load() {
+        let mut g = typical_session();
+        g.user_arranged = true;
+        let json = serde_json::to_string(&g).unwrap();
+        let restored: AudioGraph = serde_json::from_str(&json).unwrap();
+        assert!(restored.user_arranged);
+
+        // Projects written before the flag existed load as "never arranged".
+        let legacy = json.replace("\"user_arranged\":true", "\"unused\":true");
+        let restored: AudioGraph = serde_json::from_str(&legacy).unwrap();
+        assert!(!restored.user_arranged);
     }
 }

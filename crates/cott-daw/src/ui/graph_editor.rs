@@ -421,11 +421,14 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
         let delta = ui.ctx().input(|i| i.pointer.delta());
         if app.ui.graph_panning {
             app.ui.graph_pan += delta;
-        } else if let Some(id) = app.ui.graph_drag_node {
-            if let Some(node) = app.project.graph.nodes.get_mut(&id) {
-                node.position[0] += delta.x / zoom;
-                node.position[1] += delta.y / zoom;
-            }
+        } else if let Some(id) = app.ui.graph_drag_node
+            && delta != egui::Vec2::ZERO
+            && let Some(node) = app.project.graph.nodes.get_mut(&id)
+        {
+            node.position[0] += delta.x / zoom;
+            node.position[1] += delta.y / zoom;
+            // The layout is theirs now; stop re-sorting it on open.
+            app.project.graph.user_arranged = true;
         }
         if let Some((from_node, from_port)) = app.ui.graph_connect_from {
             let tip = pointer
@@ -641,6 +644,11 @@ pub fn draw(app: &mut CottApp, ui: &mut egui::Ui) {
         });
     });
 
+    if matches!(action, Some(ContextAction::Add(_))) {
+        // A node dropped at the pointer is a deliberate layout choice too.
+        app.project.graph.user_arranged = true;
+    }
+
     match action {
         Some(ContextAction::Add(AddNodeAction::Gain)) => {
             let mut node = cott_core::graph::GraphNode::stereo_gain_pan("Gain");
@@ -797,12 +805,17 @@ fn set_zoom_percent_at(app: &mut CottApp, screen_pos: egui::Pos2, percent: i32) 
 fn node_body_width(node: &cott_core::graph::GraphNode) -> f32 {
     let _ = node;
     // Room for labels like "MIDI Out A" / "L In A".
-    176.0
+    cott_core::graph::layout::NODE_WIDTH
 }
 
 fn node_visual_height(node: &cott_core::graph::GraphNode) -> f32 {
     let ports = node.inputs.len().max(node.outputs.len()).max(1);
     56.0 + (ports as f32 - 1.0) * 14.0
+}
+
+/// Drawn footprint of a node, for anything that needs to lay the graph out.
+pub fn node_size(node: &cott_core::graph::GraphNode) -> [f32; 2] {
+    [node_body_width(node), node_visual_height(node)]
 }
 
 fn organise_graph(app: &mut CottApp) {

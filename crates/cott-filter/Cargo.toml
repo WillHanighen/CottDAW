@@ -11,5 +11,6 @@ crate-type = ["cdylib"]
 
 [dependencies]
 cott-filter-dsp = { workspace = true }
-nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", default-features = false, features = ["vst3"] }
-nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug.git" }
+cott-plugin-ui = { workspace = true }
+nih_plug = { workspace = true }
+nih_plug_egui = { workspace = true }
