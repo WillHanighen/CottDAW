@@ -1,0 +1,63 @@
+A B Cc ie) E
+VOICE CODE ol1 11114 2701 VOICE FLOW CHART VOICE:FUZZ GUIT. I
+2701 BOARD TEST POINTS: RE-
+FER TO THE SCHEMATICS FOR
+BOARDS A, B & C FOR THE LO-
+@ - - BOARD A
+: Sime 45 Fozz WAVEFORM
+GENERATOR
+. BOARD
+"Ske As Fueet | PULSE ow. SAWTOOTH
+. : OUTPUT | Pa# OUTPUT
+- - VeoaRDG rs ns
+|
+ro) - el | 1
++ : ' PULSE @) @ 1
+o |! AMPLIFIER 1
+\
+1
+- . ! SAWIPULSE | {
+- - MIXER
+oT]
+| @)
+i
+@e)- - 10 I 6) '
+: - | i
+! 1
+| @@8 OH 008008
+7 : \ \
+- bameewrr=-i0 ll)] % « aan 2 2 8 HPF {
+1 i} os”? "3 ££ ¢ 8 1
+-|li] a 2 * ae ogc * 8 HIGH |
+- - § és uw SS > b ui wo PASS
+- : | — — a FILTER |
+| Res. BANK] | RES. BANK 2 RESONATOR BANK \
+° |p @ RES.) (3 RES.) 3 (5 RESONATORS) Ape ¢ oO i
+. . !
+- -, || @ ©) a © © O@ |
+P | |
+RD - - |
+: oo ||! \
+' |
+et @
+- - /o;ft 1 ~~ ~~~ ee
+I VCF ti 1
+; ! VOLTAGE ti
+69) 7 /——_* | CONTROLLED i ley ADSR {
+: | FILTER i
+> (Low Pass) ENVELOPE H
+\ GENERATOR 1
+: . 1 1
+- - | Gs) \
+| {
+- — @
+: : ' VCA AR \
+—— '
+. . ' VOLTAGE io ENVELOPE '
+H CONTROLLED i GENERATOR '
+- - ' AMPLIFIER 1 \
+i | '
+at e |
+\ 14 BOARD B !
+. Loe EE LL EH
+25

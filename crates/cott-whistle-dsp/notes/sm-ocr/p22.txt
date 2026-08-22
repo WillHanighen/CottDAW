@@ -1,0 +1,63 @@
+ALBICIDI/E
+VOICE CODE olololol1 2701 VOICE FLOW CHART VOICE: Buzz Bassoon
+2701 BOARD TEST POINTS: RE-
+FER TO THE SCHEMATICS FOR
+BOARDS A, 8 & C FOR THE Lo-
+CATIONS OF THE TEST POINTS.
+@ -5 BOARD A
+“Up waveronM.
+o GENERATOR
+: : BOARD
+@. re “15 @ GQ)
+PULSE SAWTOOTH
+, e ouTPUT OUTPUT
+- “$ FBOARDC Sn
+|
+@ - - 2 | I
+~ fe : ! PULSE @) @ |
+1 AMPLIFIER
+o |i
+: : ! SAW/PULSE {
+- - MIXER
+@
+1
+A | a
+! '
+o |! eS eed be0d8
+: : I , I
+- - s z9 7 2» HPF
+A J ° °
+eo _ -v \ gos wu SS > Bou wu 8 Page
+- —. ——_—_————— st FILTER
+| JRES. BANK RES. BANK 2 RESONATOR BANK 1
+° | fp @ Res.) (3 RES.) 3 (5 RESONATORS) Ap cD |
+. . |
+- -cey||1 (s) a & ©O®M ®©® |!
+pe Se!
+@-
+(
+0
+1 |
+. \ [. I O) ne
+- --5 1 Ip. eee ee
+oily VCF if 1
+' VOLTAGE tl
+@- eae CONTROLLED | ley ADSR
+. nn Cae | FILTER i 1
+So = (LOW PASS) ENVELOPE t
+| GENERATOR 1
+: : | !
+- - | 2) |
+{
+©
+1
+i VCA AR H
+!
+H VOLTAGE 189 ENVELOPE |
+H CONTROLLED it GENERATOR H
+1 AMPLIFIER I i fl
+!
+® i
+i | BOARD B !
+tow ee Ee I LL EH
+39

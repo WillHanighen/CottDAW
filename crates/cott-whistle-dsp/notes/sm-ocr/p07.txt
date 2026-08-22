@@ -1,0 +1,62 @@
+of the frequency divider are connected to the data 6.6 Board F-II & F-III Circuit Description
+selector chip which moniters the changing code. The
+last two divisions (octave information) are decoded so , |
+that only one bus rod is enabled at a time (enabled is In order to minimize the number of interconnecting
+logic 0) wires between the Voice Select board and the rest of
+the Pro Soloist, the 15 Voice Select switches are
+‘The inputs of Z11 are wired to the keyboard contacts encoded into five bit binary words. In this manner, it
+such that all C’s are wired to pin 8, C#s to pin 7 etc. is possible to send over five wires all of the informa-
+When a key is depressed, one of the outputs of the tion necessary to say which of the 15 switches has
+octave decoder is connected to one of the inputs of been depressed. Separate wires are also brought out
+the data selector chip. Pin 10 of Z11 will be a logic 1 for the portamento switch, In addition a Voice
+only when the following occurs: 1) A key is de- select squelch line is also brought out which indicates
+pressed (to enable a particular input of Z11), 2) The when none of the switches are on,
+octave decoder output is enabled (occurs only when
+the octave code is correct), and 3) The code on
+pins 11, 13, 14 and 15 matches the enabled input
+(Example: ‘D’ input is enabled AND code 0010 is
+resent on the data selector input).
+p p VOICE CODE TRUTH TABLE
+A logic 1 on pin 10 of 211 indicates that at that in- [| A=-o0 [| A=1 [B[c|[bD/e |
+stant, the codes on the output of the six stage fre- OFF OFF 0 0 0 0
+quency divider matches the key and octave depressed. Buzz Bassoon | Bassoon olofo|l.a
+The output of Z11 (pin 10) is processed through the Saxophone English Horn | 0 O 1 ti)
+strobe gate and the R-S flip flop to update the 6 bit Space Reed Oboe oO QO 1 1
+memory by pulsing the clock inputs of the ‘D’ type eee ete (eee ey; ye ye
+i ong Whistle jute
+flip flops. Thus the outputs of the 6 stage frequency Now Tubs oli1it1io
+divider are quickly memorized before the number Pulsar Trombone o fifa |i
+changes. ComicWow |FrenchHorn | 1 | 0 | 0 | 0
+Mute Trumpet | Trumpet 1}ofo]4
+Since the only time the R-S flip flop changes state is ree Guitar we i ° i °
+a . jarpsichor iolin
+when a key is being depressed, the gate memory cir- Space Bass ElectricBass |1 | 1 | 0 | 0
+cuit monitors the output of the R-S flip flop to Steel Drum | ElectricPiano } 1 | 1 | 0 | 1
+provide a gate signal (+5 volts) for as long as a key is Country Guitar | Banjo 1 1 1 oO
+depressed. The leading edge of the gate signal (OQ bar) Fuzz Guitar I | Fuzz Guitar | | 1 1 1 1
+is differentiated and processed through the one shot
+circuit to develop a 15msec. delayed trigger pulse
+whenever a key is depressed.
+When one key is being held, additional triggers are
+obtained from the 6 bit code change detector. The 6-7 Board G (Power Supply)
+exclusive OR gates provide pulses to the one shot An apparent malfunction of the power supply may be
+delay circuit only when the key or octave code
+hhange (wh a t key is d ) the result of shorts or other problems on other boards
+ehange (when a diferent Key Is depressed). in the Pro Soloist. If there is any doubt about the
+' power supply being defective, remove P1 from board
+F C and clip on a set of dummy loads as follows:
+> uw
+gee ; +15V to ground: 270 ohm, 1 Watt
+uw 2 uy -15 V to ground: 330 ohm, 1 Watt
+is ‘
+g 3 of +5 V to ground: 5 ohm, 10 Watt
+ra " :
+guc fo Observe the following color coding of power supply
+<e nN wires:
+ga 8B te! +15V = Red
+my --15V = Violet
+A ‘er (Counts +5 V = Orange
+m1? 4 31 49 63) Ground = Black
+pin Se
+D3#1 Depressed (pulse updates 6 bit memory]
+7

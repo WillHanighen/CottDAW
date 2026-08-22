@@ -1,0 +1,61 @@
+A B Cc D E
+VOICE CODE 1/1 1 1 1 2701 VOICE FLOW CHART VOICE: FUZZ GUIT.1
+2701 BOARD TEST POINTS: RE
+FER TO THE SCHEMATICS FOR ~
+BOARDS A, B & C FOR THE LO- .
+O- -F BOARD A
+: Z WAVEFORM
+© GENERATOR
+BOARD
+--5
+a) - ' a Tes @ ©
+| | “| | PULSE SAWTOOTH
+_ = ° OUTPUT OUTPUT
+~  ywamce pulse ~ Ve0aRDC et
+|
+@- 7 | © © |
+. : PULSE
+SAME 43 TP-2 H AMPLIFIER '
+. . ' SAW/PULSE '
+- - R
+| © 1
+1
+@ - ~-% Wht G) !
+: - i] 1
+| t
+-o || 6@ ©6808 O0V88
+' a z + 9 '
+- - - o 2» HPF
+fe} O°
+@ - Vidas] {eae} {seo aa]] ae ft
+- : ' —— ——— —— FILTER |
+| |Res. BANK] | RES. BANK 2 RESONATOR BANK 1
+1} @ Res. (3 RES.) 3 (5 RESONATORS) Ae cD t
+. . |
+. / i @ @ ® © C006!
+! |
+& - ~ Sowy | I
+: : | |
+I I
+1 i
+. ; ©) |
+- - |} - 2 --
+Dad | | vcr i 1
+om _ ! VOLTAGE tt i
+| CONTROLLED ! ley ADSR i
+| (Low Pass)
+—_________—_o LOW PASS ENVELOPE
+. 1 \
+- 7 Wh Gs) |
+. . 1 1
+VcA AR 1
+° | |
+ome Wile Vane ! VOLTAGE 19 4 ENVELOPE !
+H CONTROLLED It GENERATOR | '
+- -s | AMPLIFIER it I
+1 '
+- -.f |II |
+| a !
+——_———————— ? fr 14 BoaRDB !{  ~
+. LoL Le EE I LN ES HF
+24

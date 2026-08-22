@@ -1,0 +1,8 @@
+[package]
+name = "cott-haze-dsp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Polyphonic electric-piano DSP for CottHaze (tape flutter + vinyl dust)"
+
+[dependencies]

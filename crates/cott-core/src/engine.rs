@@ -1,9 +1,9 @@
 //! Realtime-safe engine messaging and offline renderer.
 
-use crate::clips::{ScheduledMidiEvent, midi_panic_events, notes_held_at};
+use crate::clips::{midi_panic_events, notes_held_at, ScheduledMidiEvent};
 use crate::dsp::{
-    AudioBuffer, MeterState, NullPluginHost, PluginAudioHost, ProcessContext, SampleCache,
-    process_block,
+    process_block, AudioBuffer, MeterState, NullPluginHost, PluginAudioHost, ProcessContext,
+    SampleCache,
 };
 use crate::graph::{CompiledPlan, NodeKind};
 use crate::ids::{NodeId, TrackId};
@@ -12,8 +12,8 @@ use crate::time::{SamplePos, TempoMap, TransportState};
 use cott_synth_dsp::PolySynth;
 use indexmap::IndexMap;
 use rtrb::{Consumer, Producer, RingBuffer};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, Ordering};
+use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub enum EngineCommand {
@@ -379,39 +379,33 @@ impl AudioProcessor {
             return;
         }
         let playing = self.transport == TransportState::Playing;
-        // Drain panic MIDI first so instruments receive CC 120/123 even when
-        // transport is already Stopped (graph would otherwise be skipped).
+        // Drain panic MIDI first so instruments receive CC 120/123 on this block.
         let mut preview_midi = std::mem::take(&mut self.pending_panic_midi);
-        let flush_panic = !preview_midi.is_empty();
-        let had_preview_work = !self.previews.is_empty() || !self.pending_preview_midi.is_empty();
         preview_midi.extend(self.tick_previews(frames as u32));
         preview_midi.sort_by(|(_, a), (_, b)| {
             a.sample_offset
                 .cmp(&b.sample_offset)
                 .then_with(|| a.sort_priority().cmp(&b.sort_priority()))
         });
-        let audition = had_preview_work || !preview_midi.is_empty() || flush_panic;
 
-        let rendered = if playing || audition {
-            let host_ref = plugin_host;
-            let mut ctx = ProcessContext {
-                sample_rate,
-                block_start: self.position,
-                block_len: frames as u32,
-                tempo: &self.tempo,
-                transport: self.transport,
-                clips: &self.clips,
-                sample_cache: &self.sample_cache,
-                automation: &self.automation,
-                plugin_audio: host_ref,
-                preview_midi: &preview_midi,
-                pdc_state: &mut self.pdc_state,
-                builtin_synth_state: &mut self.builtin_synth_state,
-            };
-            process_block(&self.plan, &mut ctx, &mut self.meters)
-        } else {
-            AudioBuffer::silent(2, frames)
+        // Always run the graph. Clip sources stay silent when stopped, but
+        // effects like CottVinyl still need to hiss and pop with no input.
+        let host_ref = plugin_host;
+        let mut ctx = ProcessContext {
+            sample_rate,
+            block_start: self.position,
+            block_len: frames as u32,
+            tempo: &self.tempo,
+            transport: self.transport,
+            clips: &self.clips,
+            sample_cache: &self.sample_cache,
+            automation: &self.automation,
+            plugin_audio: host_ref,
+            preview_midi: &preview_midi,
+            pdc_state: &mut self.pdc_state,
+            builtin_synth_state: &mut self.builtin_synth_state,
         };
+        let rendered = process_block(&self.plan, &mut ctx, &mut self.meters);
 
         // Interleave into output.
         for i in 0..frames {
@@ -437,10 +431,8 @@ impl AudioProcessor {
             }
             self.shared.set_position(self.position);
             let _ = evt_tx.push(EngineEvent::Position(self.position));
-            let _ = evt_tx.push(EngineEvent::Meters(self.meters.clone()));
-        } else if audition {
-            let _ = evt_tx.push(EngineEvent::Meters(self.meters.clone()));
         }
+        let _ = evt_tx.push(EngineEvent::Meters(self.meters.clone()));
     }
 }
 

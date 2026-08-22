@@ -1,0 +1,26 @@
+ew Se —— e
+ened SSS
+TABLE OF CONTENTS
+1, Introduction . 6... ee tet e eee
+2. Theory of Operation... 6... ee eee ee 2
+3. General Information ©... 6... ee eee ee ed
+4, Trouble Shooting Procedure... 1... ee eee ed
+5. Tuning and Calibrations 2.02 eee ee ee
+6. Circuit Descriptions... 0. eee eee oD
+7, R.O.M, Truth Tables 2... tee ee e  B
+8. Voice Flow Charts... 2... eee eee IO
+9, Interconnection Diagram . 2... eee ee ee AO
+10, Block Diagrams, Board A, C& EL... eee eee 41-43
+11, Schematics & Layouts, Boards A, B,C, D, E,F,&G.........20.224...44-61
+12, Parts List... ce ete ee 62
+THE INFORMATION CONTAINED HEREIN IS CONFIDENTIAL AND PROPRIETARY TO ARP INSTRUMENTS, INC. IT IS
+DISCLOSED TO YOU SOLELY FOR PURPOSES OF INSTRUCTION AS TO OPERATION OF THE EQUIPMENT AND
+MAINTENANCE AS APPROPRIATE. IT IS NOT TO BE USED BY YOU FOR ANY OTHER PURPOSE, NOR IS IT TO BE
+DISCLOSED TO OTHERS WITHOUT THE EXPRESS PERMISSION OF ARP INSTRUMENTS, INC.
+ARP INSTRUMENTS, INC.
+45 Hartwell Avenue
+Lexington, MA 02173
+(617) 861-6000
+Document No. 9001801
+© March, 1976, by ARP Instruments, Inc.
+3rd Printing (updated) March, 1977

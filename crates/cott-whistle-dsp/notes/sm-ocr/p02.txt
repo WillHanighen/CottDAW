@@ -1,0 +1,95 @@
+1. Introduction CONTROLS:
+
+Included in this service manual are troubleshooting
+
+ial ake Aim Aisne deal hia Aiea Portamento— Enables the pitch to slide from note to
+
+the repair time of the Pro Soloist. note
+
+Section 2 covers the signal flow through the Pro
+
+Soloist. Section 3 describes design techniques unique Portamento Speed—Regulates the time required to
+
+to the product. Section 4 describes ‘where to start’ slide from note to note.
+
+when a problem occurs. The circuit descriptions in
+
+section 5 should be consulted once a faulty circuit Touch Sensitivity Controls the over-all amount of
+
+has been identified by the use of the R.O.M. truth keyboard touch sensor effects,
+
+tables and Voice Flow charts in sections 7 and 8.
+
+VOICES AND EFFECTS Brilliance—Permits the addition or subtraction of
+
+Bassoon Buzz Bassoon brilliance.
+
+English Horn Sax
+
+epee . Space Reed Volume— Regulates the over-all volume of the
+
+arine s ,
+
+Flute Song Whistle instrument.
+
+Tuba Noze
+
+Trombone Pulsar Repeat—Creates the rapid pick strokes of string
+
+French Horn Comic Wow instruments.
+
+Trumpet Mute Trumpet
+
+Cello Steel Guitar Vibrato/Repeat Speed—Controls the vibrato speed and
+
+Violin ‘Harpsichord repeat rate.
+
+Bass Space Bass
+
+Piano Steel Drum
+
+Banjo Country Guitar Octave Transpose Switch—Transposes the instrument
+
+Fuzz Guitar | Fuzz Guitar II up and down one octave.
+
+2. Theory of Operation Waveform Generator board, A sawtooth wave and a
+
+The Pro Soloist is a hybrid of digital and analog cir- anneal RAs analnanniil
+
+cuits, The internal flow of the audio signals is, in controlled filter (VCF), the voltage controlled ampli-
+
+most respects, quite similar to any of our other fier (VCA), and 14 fixed filters. The signal paths
+
+synthesizers, That is, a raw signal (pulse or sawtooth through board C are determined by the R.O.M. out-
+
+wave) is processed through a voltage controlled filter puts which select one of several paths through the
+
+and a voltage controlled amplifier to the output of different filters.
+
+the instrument. Two envelope generators (ADSR and
+
+AR) are available to control the VCF and VCA to
+
+determine the attack and decay characteristics of the Board B provides the ADSR or AR output to the
+
+instrument. In addition to the voltage controlled VCF and/or the VCA (again determined by the
+
+filter, there are fixed band pass filters which shape R.O.Mss), Board E (keyboard electronics) sends a 6
+
+the raw waveforms for particular voices. bit (6 line) code to board A to control the pitch of
+the oscillator, Board E also supplies the envelope
+
+In variable synthesizers, such as the ARP Odyssey or generators on board B with a gate and trigger. Board
+
+the ARP 2600, the signal paths, oscillator waveforms F, the Voice Selection board, generates a 5 bit code
+
+and filter characteristics are adjusted manually, In the which addresses all of the R.O.M.s (eight total) which
+
+Pro Soloist, each of these settings are programmed by in turn program the signal paths and filter settings.
+
+a digital memory. (Read Only Memory, or R.O.M.). The Special Effects board (D) generates the touch
+sensor effects: vibrato, growl, wow, volume, brilliance
+
+Referring to the block diagram, Board A is the and pitch bend,
+
+2

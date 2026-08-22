@@ -1,0 +1,60 @@
+A B Cc i3} E
+VOICE CODE ol olo 1/4 2701 VOICE FLOW CHART VOICE: SPACE REED
+2701 BOARD TEST POINTS: RE-
+FER TO THE SCHEMATICS FOR
+BOARDS A, B & C FOR THE LO-
+@)- 7 — = BOARD A
+oO GENERATOR
+. BOARD
+O- U4 © o)
+PULSE SAWTOOTH
+: ” OUTPUT OUTPUT
+- “= |[reoanee- iia
+. I
+© - -2 |il |
+. —_] > ' PULSE G@) ©) i
+LI ° H AMPLIFIER, \
+° . \ SAW/PULSE '
+- - MIXER
+| @ \
+1
+O- “a ft Oo |
+— 1 NY NS I
+ol! eS ©@8 O@0e®8
+' “ za ao Oo I
+- - w 2 a HPF
+i} 3 egrll7$€ es
+Qb)_ - i] a @ 7 a °¢ eo gt * @ HIGH I
+\ o > ui o > > o wu woo PASS I
+- - ——_| | ———_ | | ——_ FILT!
+RES. BANK RES. BANK 2 RESONATOR BANK ER i
+|
+| [L@ RES») (3 RES.) 3 (5 RESONATORS) Apc Oo \
+. . |
+- i___»- 1 @ Gs) a @& OM ®O® !
+KEY Dose 1 |
+O —yw—_Yw— -' ||! |
+eo | ©
+: . ! en
+- - P ~~~ +--+ -
+1 VCF ii 1
+(a4) | VOLTAGE i
+~~“ 2 | CONTROLLED i lay ADSR H
+: j FILTER H
+0 (LOW PASS) ENVELOPE fi
+” \ GENERATOR !
+| i
+- - | Qs) \
+| i
+(es) _ - 1 @
+. H VcA AR \
+ro) : !
+. H VOLTAGE 19 ENVELOPE |
+H CONTROLLED I GENERATOR '
+- -s i AMPLIFIER, \ | |
+_ - | i
+a |! eo
+—_——_—— ° | | BOARD B !
+eae ne ree
+- -6b
+7

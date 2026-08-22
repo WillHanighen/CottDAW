@@ -1,0 +1,8 @@
+[package]
+name = "cott-pluck-dsp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Karplus-Strong dusty guitar DSP for CottPluck"
+
+[dependencies]

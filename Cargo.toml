@@ -11,6 +11,18 @@ members = [
     "crates/cott-filter",
     "crates/cott-whistle-dsp",
     "crates/cott-whistle",
+    "crates/cott-haze-dsp",
+    "crates/cott-haze",
+    "crates/cott-vinyl-dsp",
+    "crates/cott-vinyl",
+    "crates/cott-tape-dsp",
+    "crates/cott-tape",
+    "crates/cott-bass-dsp",
+    "crates/cott-bass",
+    "crates/cott-pluck-dsp",
+    "crates/cott-pluck",
+    "crates/cott-kit-dsp",
+    "crates/cott-kit",
     "crates/cott-plugin-ui",
     "crates/cott-xtask",
 ]
@@ -28,6 +40,12 @@ cott-ipc = { path = "crates/cott-ipc" }
 cott-synth-dsp = { path = "crates/cott-synth-dsp" }
 cott-filter-dsp = { path = "crates/cott-filter-dsp" }
 cott-whistle-dsp = { path = "crates/cott-whistle-dsp" }
+cott-haze-dsp = { path = "crates/cott-haze-dsp" }
+cott-vinyl-dsp = { path = "crates/cott-vinyl-dsp" }
+cott-tape-dsp = { path = "crates/cott-tape-dsp" }
+cott-bass-dsp = { path = "crates/cott-bass-dsp" }
+cott-pluck-dsp = { path = "crates/cott-pluck-dsp" }
+cott-kit-dsp = { path = "crates/cott-kit-dsp" }
 cott-plugin-ui = { path = "crates/cott-plugin-ui" }
 
 # Pinned in one place so every first-party plugin links the same egui/nih-plug.

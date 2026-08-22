@@ -1,0 +1,66 @@
+PITCH BEND, VIBRATO BOARD D TREMOLO, WOW, BRILLIANCE, VOLUME
+SPECIAL EFFECTS
+WAVEFORMGENERATOR ME S| FILTER BOARD
+PULSE
+. VCF, VCA >
+AND FILTER BANKS
+| III VOICE CODE (5 Lines)
+KEY & OCTAVE ae =
+CODE (6 LINES) ENVELOPE ENVELOPE
+TO VCA TO vcF
+poeta: es me OT
+KEYBOARD ELECTRONICS 1 ENVELOPE
+TRIGGER (LJ
+LJ GENERATORS
+AR & ADSR
+PRO SOLOIST BLOCK DIAGRAM
+
+3. General Information 4. Trouble Shooting Procedure
+
+The digital circuits in the Pro Soloist employ ‘open INSTRUMENT DEAD: When the Pro Soloist is to-
+
+collector’ TTL devices. This means that a logic 1 is tally dead, the following should be checked:
+
+an open circuit, and a logic 0 is ground. The voltage 1. Power supply: Check the +15 volt, -15
+
+level on the output of this type of gate does not volt and +5 volt outputs. If the power
+
+necessarily relate to the logic level. Illustrated below supply (board G) is malfunctioning, re-
+
+are two uses for the open collector type gates which move the power connector from board C
+
+will be found in the Pro Soloist. and connect the supply to a dummy load
+while trouble shooting (see the power
+
+A B c asy. supply, section for dummy load values).
+
+hws 2. VCA: All signals in the Pro Soloist are
+routed through the VCA; therefore, the
+
+output of the VCA should be checked
+
+while a key is depressed . If there is no
+
+A signal, check the output of the VCF. If
+
+there is still no signal, check the sawtooth
+
+B = LOGIC 1: Signal passes A=LOGIC 1: +5 VOLTS and pulse outputs of board A.
+from A to C (B is open)
+
+B = LOGIC 0: Signal is A= LOGIC 0: 0 VOLTS VOICES MISSING, INCORRECT OR DEAD: When
+stopped (B grounds out some of the voices are correct and some incorrect, the
+the signal) defective circuit common to the incorrect voices must
+
+. be identified. Proceed as follows:
+
+It is necessary in some circuits to add (externally) a 1, Check the voice code output of board
+“pull up” resistor (22K typical) from the +5 volt F: This code addresses ALL of the Read
+Power supply to the output of an open collector type Only Memory chips in the Pro Soloist.
+gate so that the logic level can be identified with a See the board F circuit description
+DVM or oscilloscope. Always verify the logic state of section for the voice code truth table.
+these chips in this manner before assuming the device
+
+is defective. CONTINUED ON NEXT PAGE
+
+3

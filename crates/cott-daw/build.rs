@@ -1,8 +1,7 @@
 //! Locate pre-bundled first-party VST3s and expose their paths to the DAW.
 //!
 //! Deliberately does **not** invoke `cargo` (nested cargo deadlocks on the
-//! package lock). Bundle with `cargo bundle-synth` / `cargo bundle-filter`
-//! or the `build-daw` script.
+//! package lock). Bundle with the `cargo bundle-*` aliases or `build-daw`.
 
 use std::env;
 use std::path::PathBuf;
@@ -14,45 +13,41 @@ fn main() {
         .and_then(|p| p.parent())
         .expect("cott-daw lives at crates/cott-daw");
 
-    println!("cargo:rerun-if-changed=../cott-synth/src");
-    println!("cargo:rerun-if-changed=../cott-synth/Cargo.toml");
-    println!("cargo:rerun-if-changed=../cott-synth-dsp/src");
-    println!("cargo:rerun-if-changed=../cott-filter/src");
-    println!("cargo:rerun-if-changed=../cott-filter/Cargo.toml");
-    println!("cargo:rerun-if-changed=../cott-filter-dsp/src");
-    println!("cargo:rerun-if-changed=../cott-whistle/src");
-    println!("cargo:rerun-if-changed=../cott-whistle/Cargo.toml");
-    println!("cargo:rerun-if-changed=../cott-whistle-dsp/src");
     println!("cargo:rerun-if-changed=../cott-plugin-ui/src");
     println!("cargo:rerun-if-changed=../cott-xtask/src");
 
-    let synth = workspace.join("target/bundled/cott-synth.vst3");
-    println!("cargo:rerun-if-changed={}", synth.display());
-    if synth.is_dir() {
-        println!("cargo:rustc-env=COTT_SYNTH_VST3={}", synth.display());
-    } else {
-        println!(
-            "cargo:warning=CottSynth.vst3 not bundled yet — run `cargo bundle-synth` (or `cargo build-daw`)"
-        );
-    }
-
-    let filter = workspace.join("target/bundled/cott-filter.vst3");
-    println!("cargo:rerun-if-changed={}", filter.display());
-    if filter.is_dir() {
-        println!("cargo:rustc-env=COTT_FILTER_VST3={}", filter.display());
-    } else {
-        println!(
-            "cargo:warning=CottFilter.vst3 not bundled yet — run `cargo bundle-filter` (or `cargo build-daw`)"
-        );
-    }
-
-    let whistle = workspace.join("target/bundled/cott-whistle.vst3");
-    println!("cargo:rerun-if-changed={}", whistle.display());
-    if whistle.is_dir() {
-        println!("cargo:rustc-env=COTT_WHISTLE_VST3={}", whistle.display());
-    } else {
-        println!(
-            "cargo:warning=CottWhistle.vst3 not bundled yet — run `cargo bundle-whistle` (or `cargo build-daw`)"
-        );
+    for (stem, env_name, pretty, alias) in [
+        ("cott-synth", "COTT_SYNTH_VST3", "CottSynth", "bundle-synth"),
+        (
+            "cott-filter",
+            "COTT_FILTER_VST3",
+            "CottFilter",
+            "bundle-filter",
+        ),
+        (
+            "cott-whistle",
+            "COTT_WHISTLE_VST3",
+            "CottWhistle",
+            "bundle-whistle",
+        ),
+        ("cott-haze", "COTT_HAZE_VST3", "CottHaze", "bundle-haze"),
+        ("cott-vinyl", "COTT_VINYL_VST3", "CottVinyl", "bundle-vinyl"),
+        ("cott-tape", "COTT_TAPE_VST3", "CottTape", "bundle-tape"),
+        ("cott-bass", "COTT_BASS_VST3", "CottBass", "bundle-bass"),
+        ("cott-pluck", "COTT_PLUCK_VST3", "CottPluck", "bundle-pluck"),
+        ("cott-kit", "COTT_KIT_VST3", "CottKit", "bundle-kit"),
+    ] {
+        println!("cargo:rerun-if-changed=../{stem}/src");
+        println!("cargo:rerun-if-changed=../{stem}/Cargo.toml");
+        println!("cargo:rerun-if-changed=../{stem}-dsp/src");
+        let bundle = workspace.join(format!("target/bundled/{stem}.vst3"));
+        println!("cargo:rerun-if-changed={}", bundle.display());
+        if bundle.is_dir() {
+            println!("cargo:rustc-env={env_name}={}", bundle.display());
+        } else {
+            println!(
+                "cargo:warning={pretty}.vst3 not bundled yet — run `cargo {alias}` (or `cargo build-daw`)"
+            );
+        }
     }
 }

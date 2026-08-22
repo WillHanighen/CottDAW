@@ -56,6 +56,12 @@ impl PluginHost {
         crate::builtin_synth::inject_cott_synth(&mut catalog);
         crate::builtin_filter::inject_cott_filter(&mut catalog);
         crate::builtin_whistle::inject_cott_whistle(&mut catalog);
+        crate::builtin_haze::inject_cott_haze(&mut catalog);
+        crate::builtin_vinyl::inject_cott_vinyl(&mut catalog);
+        crate::builtin_tape::inject_cott_tape(&mut catalog);
+        crate::builtin_bass::inject_cott_bass(&mut catalog);
+        crate::builtin_pluck::inject_cott_pluck(&mut catalog);
+        crate::builtin_kit::inject_cott_kit(&mut catalog);
         Self {
             catalog,
             instances: IndexMap::new(),
@@ -69,6 +75,12 @@ impl PluginHost {
         crate::builtin_synth::inject_cott_synth(&mut catalog);
         crate::builtin_filter::inject_cott_filter(&mut catalog);
         crate::builtin_whistle::inject_cott_whistle(&mut catalog);
+        crate::builtin_haze::inject_cott_haze(&mut catalog);
+        crate::builtin_vinyl::inject_cott_vinyl(&mut catalog);
+        crate::builtin_tape::inject_cott_tape(&mut catalog);
+        crate::builtin_bass::inject_cott_bass(&mut catalog);
+        crate::builtin_pluck::inject_cott_pluck(&mut catalog);
+        crate::builtin_kit::inject_cott_kit(&mut catalog);
         self.catalog = catalog;
     }
 

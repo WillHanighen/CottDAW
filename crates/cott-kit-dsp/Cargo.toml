@@ -1,0 +1,8 @@
+[package]
+name = "cott-kit-dsp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Synthesized dusty drum kit DSP for CottKit"
+
+[dependencies]

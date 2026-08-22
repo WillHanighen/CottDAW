@@ -1,0 +1,56 @@
+control input to turn it off to prevent transients from 32 Hz. to produce the growl signal. This signal is
+being heard when a voice switch is turned on. gated into a band pass circuit (Z2D and Z2E) through _
+a — CR8. The growl output is applied to the VCF control f
+6.3 Board C Circuit Description input through Z6 on board B.
+Board C contains a voltage controlled filter (VCF), a
+voltage controlled amplifier (VCA) , four high pass 6.5 Board E Circuit Description
+filters (HPF) and ten band pass filters (arranged in
+one of three banks), R.O.Ms Z6, Z7 and Z8 ’ The keyboard electronics generate three signals which
+determine the signal paths through each of these are routed to other parts of the. instrument:
+filters and determines the settings for the VCF. 1, Pitch information (4 bit key code and
+2 bit octave code).
+The sawtooth waveform supplied from board A is 2. Gate (+5 volts while a key is down),
+processed through the Sawtooth/Pulse Mixer and is 3. Trigger (short pulse on each new key
+routed through one or more of the High Pass Filters. depression).
+The output of the HPF is routed through the VCF The codes for each key are as follows:
+and the VCA to the output of the Pro Soloist. c 0000
+: CH 0001
+The pulse waveform from the pulse amplifier can take D 0010
+either of two paths: through the Sawtooth/Pulse DH 0011
+mixer, or through the resonator banks. Resonator E 0100
+banks 1, 2 and 3 are supplied with the pulse wave- F 0101
+form only. R.O.M. Z8 determines which (if any) of FE 0110
+the resonators in each bank are enabled, The output G 0111
+of Resonator Bank 1 and 2 may routed only to the GH 1000
+input of the VCA. The output of Resonator Bank 3 A 1001
+may be routed to the input of either the VCF or the At 1010
+VCA (again, determined by R.O.M. 28). B 1011
+Notused 1100
+The VCF Tracking circuit determines whether the “ 1101
+VCF will track at one volt per octave, 2 volts per “ 1110
+octave, 5 volts per octave, or not at all. The Res- “ a 1111
+onance circuit determines the amount of feedback
+from the VCF output to the VCF input for ‘wow ‘ Octave1 OO
+effects. Octave2 01
+a . Octave3 10
+6.4 Board D Circuit Description Octaved 11
+Board D provides the touch sensor effects: Vibrato, (High C
+Pitch Bend, Wow, Repeat, Growl, and Brilliance. only)
+Z3 is a low frequency oscillator producing a triangle In order to generate these coded outputs, the cir-
+wave for vibrato and tremolo, and a square wave for cuitry on board E is designed to scan the keyboard
+repeat triggers. about 100 times per second, When the scanning cir-
+cuitry comes to a note which is pressed down by the
+24 and Z5 are a voltage controlled amplifier exclu- performer, the number corresponding to that note is
+sively for the vibrato signal. 3, 04 and OS delay the loaded into the 6 bit memory at the output and a
+Vibrato VCA from turning on for certain voices (such gate and trigger pulse are generated,
+as violin) producing a delayed vibrato, All ‘upper’
+voices have delayed vibrato (if used at all); lower An oscillator (Z2C, Z8D Z8B and C3) produces a
+voices have undelayed vibrato, Z4D and Z4E switch square wave at about 150 KHz. The output of the
+the output of the Vibrato VCA to either P7-11 for oscillator is fed into a six stage frequency divider (24
+vibrato or P7-16 for tremolo. Vibrato and tremolo are & Z5). The first four stages of the frequency divider
+never on at the same time. Tremolo affects the VCF (Z4) are wired to a ‘data selector’ chip (Z11).
+on board C; vibrato affects the pitch of the oscillator
+on board A, The outputs of the six stage frequency dividers pro-
+duce a six bit binary word which ‘counts’ from _
+Z2 B and Z2C are an astable flip flop oscillating at 00 0000 to 11 111 (0 to 64). The first four divisions
+6

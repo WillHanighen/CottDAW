@@ -1,0 +1,71 @@
+A|BI|CjJOJE
+VOICE CODE ol 4 ola | 2701 VOICE FLOW CHART VOICE: HARPSICHORD
+2701 BOARD TEST POINTS: RE-
+FER TO THE SCHEMATICS FOR
+BOARDS A, B & C FOR THE LO-
+CATIONS OF THE TEST POINTS.
+@®— s BOARD A
+LL WAVEFORM
+° GENERATOR
+. BOARD
+© i. 5 © O
+° PULSE SAWTOOTH
+: ; OUTPUT OUTPUT
+- - TpoarpeCO*dSSO
+H \
+® - - = |il !
+: : | PULSE @) @ 1
+pe ' AMPLIFIER
+° 1 !
+'
+. . H sawiPuLse | |
+- - IXER
+| @
+'
+
+iD - -s | ® |
+flr. |
+eo 1 '
+
+oi! ©©@ O©@O O86
+1 i}
+= - “ z= o 9 HPF
+o z 4
+© Q g H
+(25) QR éS ui 8S 5 § uo wu 6 pase |
+- > —} |] ] —________| FILTER
+| |Res. BANK] | RES. BANK 2 RESONATOR BANK !
+TT 8 | [pL @ RES) (3 RES.) 3 (5 RESONATORS) Ae Cc Oo
+. ° !
+- - |r @ © @ © PP O® |
+I
+a) _ FPABT PEAY 1 | |
+: : ' |
+| |
+.
+! I
+. L I ; ' 9 |
+- 1 i | -.----~--—--------
+LEV OScrAL | VCF ii 1
+oe | tt
+- - VOLTAGE
+Rs) & | CONTROLLED | lag ADSR 1
+I FILTER 1
+° (LOW PASS) ENVELOPE t
+. ' GENERATOR ni
+| '
+- -e i Qo) !
+I 1
+a) — - ht o
+: H VCA AR H
+nt
+: \ VOLTAGE ney ENVELOPE 1
+i CONTROLLED | GENERATOR '
+_ -5 AMPLIFIER, }
+i
+- - 4 i 1 '
+fo i | !
+| ® 1 !
+0 1 ty BOARD B |
+. a
+29

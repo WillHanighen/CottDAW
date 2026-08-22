@@ -1,0 +1,16 @@
+[package]
+name = "cott-kit"
+version.workspace = true
+edition = "2021"
+license.workspace = true
+authors.workspace = true
+description = "CottKit — dusty drum kit as a nih-plug VST3"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+cott-kit-dsp = { workspace = true }
+cott-plugin-ui = { workspace = true }
+nih_plug = { workspace = true }
+nih_plug_egui = { workspace = true }

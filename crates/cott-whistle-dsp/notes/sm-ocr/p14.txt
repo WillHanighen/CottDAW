@@ -1,0 +1,63 @@
+A|BiICIDIE
+VOICE CODE 11 ol 14 i/o 2701 VOICE FLOW CHART VOICE: TUBA
+2701 BOARD TEST POINTS: RE-
+FER TO THE SCHEMATICS FOR
+BOARDS A, B & C FOR THE LO-
+CATIONS OF THE TEST POINTS.
+O- 7 BOARD A
+eae na Puore ——_ cevenet on
+cs rs
+. C Dowas 5 ocrmmuas) . BOARD
+same ns cuore PULSE SAWTOOTH
+7 : OUTPUT OUTPUT
+- - -—--------— —— | - ----4—-- -----—----
+' BOARD C I
+O- Hi |
+. : | PULSE
+Same 4S Prove \ AMPLIFIER © © '
+. . ! SAW/PULSE '
+- - | @)) MIXER I
+' i
+DVRANG HEF DOAN !
+(a6) 9 PONENTS +10 |] | 6) {
+: +2 {1 i}
+l t
+- | © OOD O@8H8 OG \
+Wow z- ° 9 {
+- - 3 4 HPF
+2 Q 2 an Ht
+28) - 7 | Ces ui OS 5 § ua i 6 pase \
+- + es — FILTER
+| JRES. BANK RES. BANK 2 RESONATOR BANK a i
+— TY: ° | [i @ Res) (3 RES.) 3 (5 RESONATORS) A pc Oo |
+. . i
+- -+7 |i @ @) 4 ©O @O® |
+! |
+29 - - | i
+: : |
+| I
+BEY Boda el (9) 1
+. . 6 I nn
+- - ~e HI 1 -.-----+----------
+I VCF ti 1
+@ -~.6 ||! VOLTAGE Vt 1
+es i] CONTROLLED i leg ADSR j
+: «EY DoW . 1 FILTER 1 i
+a 0 (LOW Pass) I ENVELOPE i
+aan 1 pave
+| |
+- - |
+\ Qs) ' \ |
+| t
+- - \ Q \ \
+: : i t
+H vca iy AR
+. . ' VOLTAGE 769 ENVELOPE !
+_ _ H CONTROLLED it GENERATOR H
+| | i
+i :
+7 ~ |
+at eo
+! | H BOARD B !
+. . Lo Ed LN SS  - - - -H
+15

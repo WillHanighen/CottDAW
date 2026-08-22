@@ -33,7 +33,7 @@ Default signal paths:
 - **MIDI:** clip source → **CottSynth** (built-in VST3) → gain/pan → master
 - **Audio:** clip source → gain/pan → master
 
-**CottSynth** always appears at the top of the plugin browser (even with an empty scan). It loads through the normal sandboxed VST3 worker and has its own editor window — open it from the **Plugins** tab (**Open Native Editor**) or the routing context menu, same as any other instrument. Waveforms: sine / saw / square / triangle / pulse / noise, plus ADSR. Loading another instrument from the browser replaces it.
+**CottSynth** always appears at the top of the plugin browser (even with an empty scan), along with CottFilter, CottVinyl, CottWhistle, CottHaze, CottTape, CottBass, CottPluck, and CottKit. They load through the normal sandboxed VST3 worker and have their own editor windows — open one from the **Plugins** tab (**Open Native Editor**) or the routing context menu. CottSynth waveforms: sine / saw / square / triangle / pulse / noise, plus ADSR. CottHaze is the lofi electric piano for held chords. CottVinyl is the record-wear effect. CottTape is a tape delay. CottBass is a mono sub. CottPluck is a dusty guitar. CottKit is a synth drum kit (kick 36, snare 38, clap 39, hats 42/46). Loading another instrument from the browser replaces the current one.
 
 ### Arrangement
 

@@ -1,0 +1,47 @@
+2. Make a list of ail the defective voices. is in the suspected circuit. Caution: The R.O.M.
+3. Consult the Voice Flow charts in this manual is often falsely accused of being defective; the wy
+to determine the circuit which is common only failure rate of the R.O.M.s is actually very low,
+to the voices listed above, Example: Oboe, Electric Bass and Electric
+| 4. Consult the schematics, Voice Flow chart Piano are dead, Violin and Cello are not cor-
+test points and the R.O.M. truth tables to de- rect, Conclusion: defective resonator bank 3,
+termine the code outputs of the R.O.M. which board C; change Z2B,
+5. Tuning and Calibrations
+TRIMMER TRIM PROCEDURE BOARD A
+R37 VCF TRACK 1, Pin low C on the keyboard.
+2, Moniter TP-1 (J2-4) with a digital voltmeter.
+3. Adjust trimmer R37 for exactly zero volts.
+R29 SET ‘B’ 1, Pin low C on the keyboard.
+2, Turn ON the VIOLIN voice switch.
+3. Put the vibrato switch DOWN.
+4, Adjust trimmer R24 (TUNE) so that the Pro Soloist is tuned to low C on an
+organ or strobe tuner,
+5, Pin the B1 key on the keyboard.
+6, Adjust trimmer R29’so that the output of the Pro Solist is tuned to ‘B’ on the
+organ or strobe tuner,
+R49 TOUCH 1, Turn ON the TRUMPET and PITCH BEND switches.
+SENSITIVITY 2, Put the TOUCH SENSITIVITY slider on the front panel in the MIDPOSITION.
+3. Adjust trimmer R49 for the amount of pitch bend desired by the customer fs
+ona firm key depression (usually maximum).
+R24 TUNE 1. This control is used to tune the Pro Soloist to the same frequency as other
+instruments it is being used with, It is adjustable from the front for the customer.
+BOARD C TRIM PROCEDURE
+R20 VCF OFFSET 1. Turn ON the FLUTE voice switch.
+(CALIBRATE) 2, Put the BRILLIANCE slider on the front panel MIDPOSITION.
+3. Adjust R20 for the best flute sound possible.
+R45 VCF CONTROL 1, Turn ON the HARPSICHORD voice switch,
+REJECT 2. Adjust trimmer R45 for minimum ‘thump’ on key depression (turn amplifier up)
+R54 VCA CONTROL 1, Adjust trimmer R45 (see above)
+2, Turn ON the HARPSICHORD voice switch.
+3. Adjust trimmer R54 for minimum ‘thump’ on key depression (turn amplifier up)
+q ee
+|
+a
+BS Touch Sensor
+Lt | we _
+ceed |
+Dow
+eS
+ee PS lal _
+—- Fee: Suro)
+2701 BOARD LOCATIONS
+4

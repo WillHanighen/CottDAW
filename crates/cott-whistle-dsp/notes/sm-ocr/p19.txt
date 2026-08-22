@@ -1,0 +1,60 @@
+A B Cc 13) E
+VOICE CODE “oot itoto ol 1tolo 2701 VOICE FLOW CHART VOICE: TELSTAR
+2701 BOARD TEST POINTS: RE- . _
+FER TO THE SCHEMATICS FOR
+BOARDS A, B & C FOR THE Lo-
+CATIONS OF THE TEST POINTS.
+@ 5 BOARD A
+, WAVEFORM
+| ft. GENERATOR
+. BOARD.
+@- “6 @ O
+6 PULSE SAWTOOTH
+: ; ourPuT | 4 OUTPUT
+- - rpoarpe |
+@) - -s Hl \
+: : ' PULSE @ ® 1
+= - ! AMPLIFIER \
+| @)
+!
+o- =a | ot
+: - i l
+I t
+“-° 1} O© OOD O88 OB \
+t l
+- al 4 zs o 2 » HPF
+° °
+eo - -O Wi] BST Ga s| is saw 8 mass!
+- : ' —— a ee FILTER \
+| JRES. BANK RES. BANK 2 RESONATOR BANK {
+° | fp @ Res) (3 RES.) 3 (5 RESONATORS) A Bc oO i
+. . |
+- -0© Ii Y Gs) ea @& ©O® ©® |!
+L Ezy psa \ }
+(23) _ peay 5 |lI i
+: : ' |
+oO
+I 1
+: | Qe |
+- -S ! Pepe ee
+Leer V posal 6 I VCF ii 1
+_ - | VOLTAGE Vt i
+| CONTROLLED i ley ADSR i
+: | FILTER i
+ee (LOW Pass) ENVELOPE I
+J \ GENERATOR 1
+i i
+- 76 Wit Qs) |
+| '
+- ~. II © H
+a Sf H VCA AR 1
+0 !
+. H VOLTAGE ney envecore |° !
+H CONTROLLED lt GENERATOR H
+- - H AMPLIFIER it H
+| 1
+| | | ~
+| ® | \
+| iy BOARD B !
+[a
+36

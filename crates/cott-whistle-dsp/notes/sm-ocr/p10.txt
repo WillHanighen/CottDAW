@@ -1,0 +1,63 @@
+A B Cc D E
+VOICE CODE 1/0 ol o 1 2701 VOICE FLOW CHART VOICE: BASSOON
+2701 BOARD TEST POINTS: RE-
+FER TO THE SCHEMATICS FOR ~,
+BOARDS A, 8 & C FOR THE LO-
+CATIONS OF THE TEST POINTS.
+© ts BOARD A
+° , GENERATOR
+: BOARD
+; © vours . PULSE SAWTOOTH
+: : output |i4 OUTPUT
+- - FBoaRDC es ann
+i]
+G) - -sv il !
+~_f\ (\ - sv! PULSE @ @ 1
+°. 18 H AMPLIFIER \
+: : ! SAW/PULSE '
+- - MIXER
+| ©
+\
+@_ — 2 |i () |
+: - i !
+| '
+° |! @@ OGO OHO
+. : \ \
+_ _e, z - o °
+LN | 3 w 25. ~§2 ay HPF
+Gy 3 6 tTojag6 6 3 &@ @ 8 HIGH
+- ~- 7m yl) Bos u 8s 5 Bu w 8 HIGH |
+- . | SS —_______—__- FILTER
+| Res oank| | Res. BANK 2 RESONATOR BANK !
+° | fp @ RES.) (3 RES.) 3 (5 RESONATORS) AB cD |
+. ° |
+. -wi|i © © @ @ Pe ©@ |
+\ |
+CD — - | |
+. : ' |
+ii
+= -av ||!
+2 Bi ftamr4 SY frm ' 69 |
+- - -svi{! 1 ~~ ~---—--~—---~----
+ONLY ON KEY DOWN oul VCF if i
+®D ! VOLTAGE Vt
+~ = oN CONTROLLED i lag ADSR ;
+7 I FILTER 1 4 1
+—_______ =o (Low Pass) 11 ENVELOPE {
+KEY Down 4 I ly GENERATOR H
+aaa :
+| I
+- - I Cr) 1 I !
+!
+- - | @ 1 1
+I ty !
+. i VcA iy AR !
+. H VOLTAGE t 1G) ENVELOPE | !
+H CONTROLLED it GENERATOR I
+- - | AMPLIFIER 1 H
+= — WN it
+: . I | |
+| 3) | i .
+\ ty BOARD B !
+. LoL LL Ld LN HF
+10

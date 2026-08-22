@@ -1,0 +1,64 @@
+A B Cc D E
+VOICE CODE ololol1 0 2701 VOICE FLOW CHART VOICE: SAX
+2701 BOARD TEST POINTS: RE _
+FER TO THE SCHEMATICS FOR
+BOARDS A, B & C FOR THE LO-
+CATIONS OF THE TEST POINTS.
+@ - -¢5 BOARD A
+. WAVEFORM
+o GENERATOR
+. f : BOARD
+- KeyDousns.
+@ Ln } &
+° PULSE DYNAMIC SAWTOOTH
+. ; OUTPUT | POLsE OUTPUT
+- - TBOARDC i |
+I
+QO | !
+~ - ! PULSE @) So i
+o ! AMPLIFIER 1
+'
+: . ! SAW/PULSE {
+- — | S) MIXER
+1
+O- — |) |
+I t
+wat | ©© ©G0 ©0068
+. ° | ° i
+- -. s ze ° 0 HPF
+‘Wie |(e eo] |-g 28 y |
+Vy J 0 Id 6 6 3 a G@ HIGH
+2D - -¢ BS u BS 5 8 ou i 6 PASS '
+- . ——_—_ a anEeEEnEEEEEEEEEEEEEEeT FILTER
+| JRES. BANK RES. BANK 2 RESONATOR BANK 1
+° | Pp @ Res. (3 RES.) 3 (5 RESONATORS) A Bc Oo i
+. . |
+- Key Ug i @ @) @ @ OO ©® !
+XX ial I
+IZ |
+8) _ - | |
+|
+°
+==" i 5
+. . I ne
+_ -s 1 } -. eee e
+Soh vcr if 1
+1 tt
+- VOLTAGE
+© - | CONTROLLED ! ve ADSR i
+. . I FILTER i)
+——______________» (LOW PASS) ENVELOPE H
+— Ls 1 GENERATOR t
+i !
+- -4 Wh @6) !
+I t
+Op | -
+“ S | VCA AR H
+. H VOLTAGE ney ENVELOPE !
+CONTROLLED GENERATOR '
+- - I AMPLIFIER | H |
+| I
+!
+! | H BOARD B !
+toe ee Ee LL-H
+38

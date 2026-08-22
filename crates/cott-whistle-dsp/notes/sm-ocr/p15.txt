@@ -1,0 +1,66 @@
+A B Cc ie) E
+VOICE CODE 1] 1 1 olo 2701 VOICE FLOW CHART VOICE: ELEC. BASS
+2701 BOARD TEST POINTS: RE-
+FER TO THE SCHEMATICS FOR
+BOARDS A, B & C FOR THE LO-
+CATIONS OF THE TEST POINTS.
+@ - eo BOARD A
+fit ey GENERATOR
+. = BOARD
+Psese winrd Neewous
+7 ON ee DAW, nerd Wide E rosON
+@- SAME AS TP-2 7 @ @
+auceer tov PULSE | pyu. SAWTOOTH
+. OUTPUT | Poise OUTPUT
+- - --------— | - ----4— -—- ------
+| BOARD C !
+|
+(25) - - +4 III |
+VV ! PULSE @ @ 1
+— H AMPLIFIER '
+\
+: : ! SawiPULSE | |
+- - | Mix
+| @ i
+1
+ - =a lft QO |
+: - 1 sl
+° | 1
+1 ©O©@ O@8O O80 OO \
+. : 1 ° {
+- --f “ z 5 eo 2» HPF
+: ifs sy leg eyilg ges s
+a fe) ° ° HI
+& - -~ a ily eos u 8S > # uy ui 8 HN !
+- - 1 _ ——— FILTER |
+| JRES. BANK RES. BANK 2 RESONATOR BANK i
+ete ay UT OU | [EL @ RES» (3 RES.) 3 (5 RESONATORS) a) |
+. ° |
+- ey © @ © OO OO!
+TY Ob5AS | .
+Gs) _ -@ |il |
+: . ' |
+| |
+|
+: ; ' © od
+- 2—$_—___>— - ' } - 22 ---
+zryosar  & WI VcF Vi 1
+@D_ _ | VOLTAGE | } ADSR i
+CONTROLLED . !
+: wre eee > | FILTER ce !
+ec RE A (LOW Pass) ENVELOPE H
+7" | GENERATOR 1
+- I |
+- — 4 Ih Qo) |
+I 1
+GD — - ev ly © !
+. . 1
+2 ee H vca AR '
+0 \ |
+| VOLTAGE ney ENVELOPE !
+H CONTROLLED Vd GENERATOR I
+- - | AMPLIFIER 1 {
+= — I (|
+Tt I | BOARD B |!
+Lowe Le EE I LE HF
+21

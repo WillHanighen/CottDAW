@@ -1,0 +1,64 @@
+A B Cc D E
+VOICE CODE 1 olilola 2701 VOICE FLOW CHART VOICE: FLUTE
+2701 BOARD TEST POINTS: RE ~
+FER TO THE SCHEMATICS FOR fo
+BOARDS A, B & C FOR THE LO-
+CATIONS OF THE TEST POINTS.
+O - - es BOARD A
+. .S
+WAVEFORM
+° GENERATOR
+. BOARD
+- os
+~45 6 ©
+: ° OUTPUT OUTPUT
+- - TBOARDC a
+|
+D+ +4 III : !
+| : ' PULSE @ @ |
+I AMPLIFIER
+fo} t |
+: . ! sawrputse |;
+- - MIXER,
+@
+am — et |i © !
+MLN I
+I 1
+ohh O©® ©8080 ©8080 ©® i
+1 i]
+= - 1 8 ~ z 5 . 3 g 8 HPF I
+Hl S o3 °? a ¢ g 8 i
+Qe)_ _ I] a 2 7 4g 9 Sgt ? 8 HIGH I
+oS w SS > $6 wi wi 6 PASS
+- - 7 _ a ———— FILTER !
+| |Res. sank] | Res. BANK 2 RESONATOR BANK |
+Theme] | eeees omesonarons) | [a «cof!
+_ Cameuirso€ mop. oY rremo.s) || |
+7 purge Key OEPRESHDL } © © ® © OO OO |
+P : {
+(23) - - | |
+: : ' |
+ee ! I
+i 0 !
+~ Uy KEY Powsns - H VCF \  inieeten|
+ed _ _ | VOLTAGE tl |
+I CONTROLLED i lay ADSR '
+: ; FILTER H
+a (LOW Pass) ENVELOPE H
+of | GENERATOR !
+! I
+- cad itl a) I
+| {
+om — 6 th @ 1
+. / \ . 1 !
+I VCA AR '
+oo 1
+. . ! VOLTAGE ; >) envetope | . !
+H CONTROLLED I GENERATOR H
+- - I AMPLIFIER | I H
+! I '
+_ - | i |
+: \ @) il H -
+! { ! BOARD B !
+. twee Ld LL
+14

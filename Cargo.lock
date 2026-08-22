@@ -888,6 +888,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "cott-bass"
+version = "0.1.0"
+dependencies = [
+ "cott-bass-dsp",
+ "cott-plugin-ui",
+ "nih_plug",
+ "nih_plug_egui",
+]
+
+[[package]]
+name = "cott-bass-dsp"
+version = "0.1.0"
+
+[[package]]
 name = "cott-core"
 version = "0.1.0"
 dependencies = [
@@ -961,6 +975,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "cott-haze"
+version = "0.1.0"
+dependencies = [
+ "cott-haze-dsp",
+ "cott-plugin-ui",
+ "nih_plug",
+ "nih_plug_egui",
+]
+
+[[package]]
+name = "cott-haze-dsp"
+version = "0.1.0"
+
+[[package]]
 name = "cott-ipc"
 version = "0.1.0"
 dependencies = [
@@ -974,6 +1002,34 @@ dependencies = [
  "tracing",
  "uuid 1.23.5",
 ]
+
+[[package]]
+name = "cott-kit"
+version = "0.1.0"
+dependencies = [
+ "cott-kit-dsp",
+ "cott-plugin-ui",
+ "nih_plug",
+ "nih_plug_egui",
+]
+
+[[package]]
+name = "cott-kit-dsp"
+version = "0.1.0"
+
+[[package]]
+name = "cott-pluck"
+version = "0.1.0"
+dependencies = [
+ "cott-pluck-dsp",
+ "cott-plugin-ui",
+ "nih_plug",
+ "nih_plug_egui",
+]
+
+[[package]]
+name = "cott-pluck-dsp"
+version = "0.1.0"
 
 [[package]]
 name = "cott-plugin-ui"
@@ -999,6 +1055,34 @@ version = "0.1.0"
 dependencies = [
  "serde",
 ]
+
+[[package]]
+name = "cott-tape"
+version = "0.1.0"
+dependencies = [
+ "cott-plugin-ui",
+ "cott-tape-dsp",
+ "nih_plug",
+ "nih_plug_egui",
+]
+
+[[package]]
+name = "cott-tape-dsp"
+version = "0.1.0"
+
+[[package]]
+name = "cott-vinyl"
+version = "0.1.0"
+dependencies = [
+ "cott-plugin-ui",
+ "cott-vinyl-dsp",
+ "nih_plug",
+ "nih_plug_egui",
+]
+
+[[package]]
+name = "cott-vinyl-dsp"
+version = "0.1.0"
 
 [[package]]
 name = "cott-vst-worker"

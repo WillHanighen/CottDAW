@@ -9,3 +9,21 @@ bundle-filter-debug = "run -p cott-xtask -- bundle cott-filter"
 # CottWhistle (monophonic Pro Soloist-style instrument).
 bundle-whistle = "run -p cott-xtask --release -- bundle cott-whistle --release"
 bundle-whistle-debug = "run -p cott-xtask -- bundle cott-whistle"
+# CottHaze (polyphonic lofi electric piano).
+bundle-haze = "run -p cott-xtask --release -- bundle cott-haze --release"
+bundle-haze-debug = "run -p cott-xtask -- bundle cott-haze"
+# CottVinyl (stereo vinyl wear effect).
+bundle-vinyl = "run -p cott-xtask --release -- bundle cott-vinyl --release"
+bundle-vinyl-debug = "run -p cott-xtask -- bundle cott-vinyl"
+# CottTape (stereo tape delay).
+bundle-tape = "run -p cott-xtask --release -- bundle cott-tape --release"
+bundle-tape-debug = "run -p cott-xtask -- bundle cott-tape"
+# CottBass (mono sub-bass).
+bundle-bass = "run -p cott-xtask --release -- bundle cott-bass --release"
+bundle-bass-debug = "run -p cott-xtask -- bundle cott-bass"
+# CottPluck (dusty guitar).
+bundle-pluck = "run -p cott-xtask --release -- bundle cott-pluck --release"
+bundle-pluck-debug = "run -p cott-xtask -- bundle cott-pluck"
+# CottKit (dusty drum kit).
+bundle-kit = "run -p cott-xtask --release -- bundle cott-kit --release"
+bundle-kit-debug = "run -p cott-xtask -- bundle cott-kit"

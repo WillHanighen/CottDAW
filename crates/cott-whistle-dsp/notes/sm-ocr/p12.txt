@@ -1,0 +1,71 @@
+A/BICI[DI_E
+VOICE CODE 1 olo 14 2701 VOICE FLOW CHART VOICE:OBOE
+2701 BOARD TEST POINTS: RE-
+FER TO THE SCHEMATICS FOR —~
+BOARDS A, B & C FOR THE LO- f
+CATIONS OF THE TEST POINTS.
+@® - sv BOARD A
+WAVEFORM
+= oO GENERATOR
+BOARD.
+(0) tov ©) o
+° PULSE [4 SAWTOOTH
+. output | + OUTPUT
+- - ros on | — - - ~ —-] — +
+| BOARD C 1
+|
+(Zs) - -+3 {II 1
+AUUNr-Ylpe- | use © © |
+! AMPLIFIER !
+. . i
+H SAW/PULSE i
+_ - i MIXER
+i ¢) \
+@ '
+@® - - H 6) |
+RE So gone tiv |
+fo) i
+A fio) Van Pie S-O*2 Hi OO OOO OO80O®
+I I
+a = a Zz - o fe] o
+1 o fo 4 ~ 09 £ B HPF i
+ty 4 G3 6 6 i a 8 8 |
+@® 2 Q g ae HIGH
+@- — $v | 6S wu 8S > Bb ui wu 6 pase
+- + —— a FILTER
+| JRes. eank] | Res. BANK 2 RESONATOR BANK “ !
+2 MUAY oA iperesy | [Gres serresonators) | [ao eo!
+. I
+- po (is) @) = @) )Qe@® |!
+KEY DOWNS I |
+(a) ~ #5v {II |
+. . | |
+} | |
+FLL I (9 |
+- : | -- a
+- te—__________st__ --8V 1 Poe ee LL
+BY OOS 1 VCF { i 1
+ie 7
+- -.sv ||) VOLTAGE it 1
+CONTROLLED 2 ADSR
+[xer vows \ | FILTER 7 23 |
+0 (LOW PASS) ENVELOPE
+It !
+; I I! GENERATOR I
+| !
+- - 1
+I 6) i t '
+i] i
+_ _ 1 @) 1 | 1
+1
+' VCA H \ AR
+re 1
+. \ VOLTAGE 1a9 ENVELOPE !
+H CONTROLLED | GENERATOR | © '
+- = H AMPLIFIER I H
+_ - | 11 }
+oe || oo
+| ~
+! | H BOARD B }
+. Le
+12

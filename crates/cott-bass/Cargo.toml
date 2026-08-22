@@ -1,0 +1,16 @@
+[package]
+name = "cott-bass"
+version.workspace = true
+edition = "2021"
+license.workspace = true
+authors.workspace = true
+description = "CottBass — mono sub-bass as a nih-plug VST3"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+cott-bass-dsp = { workspace = true }
+cott-plugin-ui = { workspace = true }
+nih_plug = { workspace = true }
+nih_plug_egui = { workspace = true }

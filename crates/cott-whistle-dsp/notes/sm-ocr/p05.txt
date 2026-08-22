@@ -1,0 +1,57 @@
+6.1 Board A circuit Description The Pulse Generator circuit monitors the outputs of
+The 4 bit key code from board E is converted to an the six stage dividers to develop the following pulse
+analog contro! voltage in the D to A converter. widths: 1/14, 1/9, 1/64 and 2/11, Additionally, the
+Although the 2 bit octave code is also fed to the D to Dynamic Pulse Converter circuit develops a variable
+A converter, it serves as a correction voltage; the (dynamic) width pulse wave. All of the pulse waves
+octave control over the voltage controlled oscillator is are supplied to the Pulse Selection circuit where one
+in the Frequency to Voltage converter circuit. The is selected by R.O.M. Z15 and routed to the pulse
+output of the D to A converter is +5 volts when any output.
+C key is depressed, When any C# key is depressed,
+the D to A output increases to about +5.3 volts, The .
+highest voltage produced by the D to A converter is 6.2 Board B Circuit Description
++9 volts when any B key is depressed. Trimmer R29
+(set ‘B’ trimmer) sets the interval between each key Board B is the Envelope Generator Board, Z1, Z2 and
+and is equivalentto the volts per octave trimmers in 23 (R.O.M.s) program the attack time, decay time,
+the standard ARP synthesizers except that it only sustain level, and release time of the ADSR envelope
+affects the interval between C and B on the keyboard generator and the attack and release times of the AR
+rather than from low C to high C. envelope generator.
+The voltage from the D to A converter is fed through ADSR: The output of the attack R-S flip flop (24
+a differential amplifier to the voltage controlled pin 3) changes from logic 1 to logic 0 when a gate and
+oscillator circuitry. Here the control voltage (now -1 trigger are supplied from the keyboard electronics
+V/OCT) is supplied to a linear voltage to exponential (board E) on J4-6 and J4-7. Z5 pin 3 provides a logic
+current converter (Q3 and Q4). Q4 determines the 1 which allows R64 to charge the integrating capa-
+charging time on capacitor C7, C7 and OS are a uni- citor, C3. Q4 and OS follow the voltage and supply it
+junction oscillator operating at about seven or eight to the switching circuitry to be routed to either the
+octaves higher than the pitch that is heard on the VCF and/or the VCA,
+output of the Pro Soloist. Q6 makes the sawtooth
+from Q5 compatible with TTL circuitry and supplies Q6 is a ‘peak detector’’ comparator. When the ADSR
+it to the frequency to voltage converter. Z3 and half output reaches the maximum voltage (about +5 volts)
+of 21 are divide by two chips which are enabled by Q6 resets the R-S flip flop output (Z4 pin 3) to logic
+the two bit octave code from board E. Depending in 1, The voltage on C3 then discharges through CR16,
+whichoctave a key is being depressed, none, one, two CR17 or CR18 to the voltage level on the junction of
+or three of these dividers are enabled to supply Z22 R30, R31 and R32 (sustain level). When the gate on
+(one shot) with a pulse wave which is either at the J4-6 is no longer present (all keys up) the remaining
+same frequency as the oscillator, or one, two or three voltage on C3 discharges through CR20 and pins 3, 4
+octaves lower. Since the pulse width on the output of or 5 of Z1 to zero,
+the one shot is constant, the repetition rate (fre-
+quency) of the pulses is integrated to provide an off- AR: The gate voltage is supplied to the AR circuit
+set voltage to the differential amplifier thus provid- from Z5 pin 8 to charge capacitor C2 through CR2,
+ing the octave control over the oscillator (4 octaves). CR3 or CR4. When all keys are released, the voltage
+The output of the differential amplifier will have a on C4 discharges through CR5 or CR6 back to pin 8
+large AC component which is filtered by C4 and C5 of Z5.
+to yield a DC control voltage (-1V/OCT) on J2-4.
+
+R.O.M. Z3 selects which envelope (ADSR and/or AR)
+The output of the voltage controlled oscillator is also is to be routed to P6-16, the VCA control input. 23
+supplied to the Programmable Octave Dividers. also selects which envelope is to be supplied to Z6.
+Depending on the voice selected, R.O.M, 215 will in- R1, R2, R3 and R4 attenuate the envelope before it
+struct half of Z1 and Z8 to either send the signal is processed through Z6. Z6 sums and inverts the
+through the circuit, or divide it either once, twice or ADSR or AR envelope, the grow! signal from board D
+three times (down 1, 2 or 3 octaves). The manual and the touch brilliance voltage from board D. The
+octave dividers divide the signal even lower, envelope must be inverted because the VCF accepts
+depending on the position of the Transpose switch. negative going control voltages. The output of Z6 is
+The signal then enters the Six Stage Frequency connected to the contro! input of the filter via the
+divider circuit whose output is processed in the Saw- brilliance silder on board A.
+tooth Sum circuit. Each of the divisions is weighted
+and summed to produce a +10 volt sawtooth made of Q7, 08 and 24 pins 9, 10 and 11 are the squelch cir-
+64 small steps. cuit which provides a momentary pulse to the VCA
