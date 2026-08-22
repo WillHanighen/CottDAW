@@ -1038,9 +1038,6 @@ dependencies = [
 [[package]]
 name = "cott-whistle-dsp"
 version = "0.1.0"
-dependencies = [
- "serde",
-]
 
 [[package]]
 name = "cott-xtask"

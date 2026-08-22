@@ -54,8 +54,7 @@ impl ScopeBuffer {
 
         let prev = f32::from_bits(self.level.load(Ordering::Relaxed));
         let smoothed = peak.max(prev * 0.82);
-        self.level
-            .store(smoothed.to_bits(), Ordering::Relaxed);
+        self.level.store(smoothed.to_bits(), Ordering::Relaxed);
     }
 
     /// Current smoothed output level (0..1-ish) for the header jewel.
@@ -166,7 +165,12 @@ pub fn paint_curve_filled(
 ///
 /// Emitted as one trapezoid per segment: egui only tessellates *convex*
 /// polygons correctly, and response / envelope shapes are not convex.
-fn fill_under(painter: &Painter, points: &[Pos2], baseline_y: f32, color: nih_plug_egui::egui::Color32) {
+fn fill_under(
+    painter: &Painter,
+    points: &[Pos2],
+    baseline_y: f32,
+    color: nih_plug_egui::egui::Color32,
+) {
     if points.len() < 2 {
         return;
     }
@@ -177,12 +181,7 @@ fn fill_under(painter: &Painter, points: &[Pos2], baseline_y: f32, color: nih_pl
             continue;
         }
         shapes.push(Shape::convex_polygon(
-            vec![
-                a,
-                b,
-                pos2(b.x, baseline_y),
-                pos2(a.x, baseline_y),
-            ],
+            vec![a, b, pos2(b.x, baseline_y), pos2(a.x, baseline_y)],
             color,
             Stroke::NONE,
         ));
@@ -262,10 +261,7 @@ pub fn paint_envelope(
     for (t, tag) in [(t_a, "A"), (t_d, "D"), (t_s, "S"), (t_r, "R")] {
         let px = x(t);
         painter.line_segment(
-            [
-                pos2(px, rect.bottom() - 3.0),
-                pos2(px, rect.bottom()),
-            ],
+            [pos2(px, rect.bottom() - 3.0), pos2(px, rect.bottom())],
             Stroke::new(1.0, with_alpha(skin.legend_dim, 90)),
         );
         painter.text(

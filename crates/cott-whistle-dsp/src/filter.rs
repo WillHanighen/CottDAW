@@ -1,39 +1,58 @@
-//! The filter half of the voice: a four-pole ladder plus a fixed resonator
-//! bank.
+//! 4034 ladder, one-pole HP, and the three Board C resonator banks.
 //!
-//! The Pro Soloist did not shape its reed voices with the VCF alone. Its pulse
-//! output could be routed through banks of fixed band-pass "resonators" whose
-//! peaks sat where an acoustic instrument's formants sit, and the result went
-//! either on into the VCF or straight to the VCA. That parallel path is what
-//! makes the worm sound like a squeezed reed rather than a filter sweep, so it
-//! is modelled here alongside the ladder that the later Moog leads leaned on.
+//! Ten named Twin-T nets, frequencies from schematic R/C (notes/2701.md).
+//! Same bank, two nets on: one interpolated peak into one op-amp. Banks 1 and
+//! 2 feed the VCA. Bank 3 feeds the VCF, the VCA, or both (Z8).
 
-/// Resonators in the bank. The hardware had ten fixed circuits and switched up
-/// to five in at once; three is enough to place a voice's formants.
+/// Twin-T f0 = 1/(2 pi R sqrt(C1 C2)), Board C schematic. Q is the bootstrapped
+/// op-amp around each bank, not a vocal formant.
+///
+/// Index: Cello2, Violin2, E.Horn, Cello1, Violin3, Violin1, Cello3, E.Piano,
+/// E.Bass, Oboe. Banks 1, 1, 2, 2, 2, 3, 3, 3, 3, 3.
+pub const CURVES: [(f32, f32); 10] = [
+    (1_453.0, 2.2),
+    (1_299.0, 2.2),
+    (988.0, 2.2),
+    (293.0, 2.2),
+    (3_308.0, 2.2),
+    (585.0, 2.2),
+    (1_937.0, 2.2),
+    (374.0, 2.2),
+    (115.0, 2.2),
+    (1_715.0, 2.2),
+];
+
+pub const CURVE_NAMES: [&str; 10] = [
+    "Cello 2", "Violin 2", "E. Horn", "Cello 1", "Violin 3", "Violin 1", "Cello 3", "E. Piano",
+    "E. Bass", "Oboe",
+];
+
+/// Hardware bank for a named curve: 0 and 1 to VCA, 2 is bank 3.
+pub fn curve_bank(curve: u8) -> u8 {
+    match curve.min(9) {
+        0 | 1 => 0,
+        2 | 3 | 4 => 1,
+        _ => 2,
+    }
+}
+
+/// Three hardware banks (Board C). Edit-panel slots collapse into these.
 pub const BANK_SIZE: usize = 3;
 
-/// Four-pole transistor-ladder low-pass, topology preserving with the feedback
-/// path solved rather than delayed, so it stays stable up to self-oscillation.
-///
-/// ARP's 4034 was a copy of the Moog ladder until Moog's lawyers intervened, so
-/// the same model serves both halves of this instrument's lineage.
+/// ROM "maximum" resonance (Z6). Wow forces this. Not self-oscillation.
+pub const RESONANCE_MAX: f32 = 0.42;
+
+/// Four-pole transistor-ladder low-pass. ARP's 4034 was a Moog copy until the
+/// lawyers arrived; resonance is capped below self-oscillation because none of
+/// the factory paddles go there.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct LadderLp {
-    /// One-pole TPT coefficient, `tan(w/2) / (1 + tan(w/2))`.
     g: f32,
-    /// Feedback depth, 0..4. Four self-oscillates.
     k: f32,
     s: [f32; 4],
 }
 
 impl LadderLp {
-    pub fn new(cutoff_hz: f32, emphasis: f32, sample_rate: f32) -> Self {
-        let mut f = Self::default();
-        f.set(cutoff_hz, emphasis, sample_rate);
-        f
-    }
-
-    /// `emphasis` is 0..1; 1 sits just under self-oscillation.
     pub fn set(&mut self, cutoff_hz: f32, emphasis: f32, sample_rate: f32) {
         let sample_rate = sample_rate.max(1.0);
         let cutoff = cutoff_hz.clamp(20.0, sample_rate * 0.45);
@@ -41,21 +60,17 @@ impl LadderLp {
             .tan()
             .clamp(1e-5, 12.0);
         self.g = t / (1.0 + t);
-        self.k = emphasis.clamp(0.0, 1.0) * 3.85;
+        self.k = emphasis.clamp(0.0, 1.0) * 3.2;
     }
 
     pub fn process(&mut self, x: f32) -> f32 {
         let g = self.g;
         let one_minus = 1.0 - g;
-        // Propagate the stored states through the cascade, then solve for the
-        // output the feedback loop settles on this sample.
         let state =
             one_minus * (g * g * g * self.s[0] + g * g * self.s[1] + g * self.s[2] + self.s[3]);
         let g4 = g * g * g * g;
         let y4 = (g4 * x + state) / (1.0 + self.k * g4);
-        // Saturating the feedback node is what makes a hard-driven ladder growl
-        // instead of scream.
-        let mut u = soft_clip(x - self.k * y4);
+        let mut u = (x - self.k * y4).clamp(-8.0, 8.0).tanh();
 
         for s in self.s.iter_mut() {
             let v = (u - *s) * g;
@@ -65,7 +80,6 @@ impl LadderLp {
         }
 
         if u.is_finite() {
-            // Feedback drains the passband; hand some of it back.
             u * (1.0 + self.k * 0.3)
         } else {
             self.reset();
@@ -78,17 +92,6 @@ impl LadderLp {
     }
 }
 
-/// Bounded saturator for the ladder's input stage.
-///
-/// Kept gentle on purpose. A narrow pulse is nearly all crest, and a hard
-/// transfer curve here flattens the very spikes that carry its harmonics — the
-/// filter ends up duller with the drive up than with it down, which is backwards.
-fn soft_clip(x: f32) -> f32 {
-    let x = x.clamp(-8.0, 8.0);
-    x / (1.0 + 0.08 * x * x).sqrt()
-}
-
-/// One fixed resonator: a two-pole band-pass with unity gain at its peak.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Resonator {
     b0: f32,
@@ -102,11 +105,6 @@ pub struct Resonator {
 }
 
 impl Resonator {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Constant peak gain band-pass (RBJ cookbook).
     pub fn set(&mut self, freq_hz: f32, q: f32, sample_rate: f32) {
         let sample_rate = sample_rate.max(1.0);
         let freq = freq_hz.clamp(20.0, sample_rate * 0.45);
@@ -114,7 +112,6 @@ impl Resonator {
         let w0 = std::f32::consts::TAU * freq / sample_rate;
         let (sin_w0, cos_w0) = w0.sin_cos();
         let alpha = sin_w0 / (2.0 * q);
-
         let a0 = 1.0 + alpha;
         let inv = 1.0 / a0;
         self.b0 = alpha * inv;
@@ -140,63 +137,48 @@ impl Resonator {
     }
 }
 
-/// Centre frequency, Q and level of one resonator slot.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ResonatorSpec {
-    pub freq_hz: f32,
-    pub q: f32,
-    pub gain: f32,
-}
-
-impl ResonatorSpec {
-    pub const fn new(freq_hz: f32, q: f32, gain: f32) -> Self {
-        Self { freq_hz, q, gain }
-    }
-}
-
-/// The parallel bank. Every slot sees the raw oscillator mix; their outputs sum.
+/// Three Board C banks. Each can feed the VCF, the VCA, or both.
 #[derive(Debug, Clone, Copy)]
 pub struct ResonatorBank {
     slots: [Resonator; BANK_SIZE],
-    gains: [f32; BANK_SIZE],
-    /// Sum of the slot gains, used to keep the bank at a sane level.
-    norm: f32,
+    to_vcf: [f32; BANK_SIZE],
+    to_vca: [f32; BANK_SIZE],
 }
 
 impl Default for ResonatorBank {
     fn default() -> Self {
-        Self::new()
+        Self {
+            slots: [Resonator::default(); BANK_SIZE],
+            to_vcf: [0.0; BANK_SIZE],
+            to_vca: [0.0; BANK_SIZE],
+        }
     }
 }
 
 impl ResonatorBank {
-    pub fn new() -> Self {
-        Self {
-            slots: [Resonator::new(); BANK_SIZE],
-            gains: [0.0; BANK_SIZE],
-            norm: 1.0,
-        }
+    pub fn set_slot(&mut self, i: usize, freq_hz: f32, q: f32, to_vcf: f32, to_vca: f32, sr: f32) {
+        self.slots[i].set(freq_hz, q, sr);
+        self.to_vcf[i] = to_vcf.max(0.0);
+        self.to_vca[i] = to_vca.max(0.0);
     }
 
-    pub fn set(&mut self, specs: &[ResonatorSpec; BANK_SIZE], sample_rate: f32) {
-        let mut total = 0.0;
-        for (i, spec) in specs.iter().enumerate() {
-            self.slots[i].set(spec.freq_hz, spec.q, sample_rate);
-            self.gains[i] = spec.gain.max(0.0);
-            total += self.gains[i];
-        }
-        self.norm = if total > 1e-6 { 1.0 / total } else { 0.0 };
+    pub fn disable_slot(&mut self, i: usize) {
+        self.to_vcf[i] = 0.0;
+        self.to_vca[i] = 0.0;
     }
 
-    pub fn process(&mut self, x: f32) -> f32 {
-        let mut sum = 0.0;
-        for (slot, gain) in self.slots.iter_mut().zip(self.gains) {
-            sum += slot.process(x) * gain;
+    pub fn process(&mut self, x: f32) -> (f32, f32) {
+        let mut vcf = 0.0;
+        let mut vca = 0.0;
+        for i in 0..BANK_SIZE {
+            if self.to_vcf[i] <= 0.0 && self.to_vca[i] <= 0.0 {
+                continue;
+            }
+            let y = self.slots[i].process(x);
+            vcf += y * self.to_vcf[i];
+            vca += y * self.to_vca[i];
         }
-        // Band-passes throw most of the signal away; the bank is brought back up
-        // to something comparable with the direct path so the Body control is a
-        // blend rather than a fade to nothing.
-        sum * self.norm * BANK_MAKEUP
+        (vcf, vca)
     }
 
     pub fn reset(&mut self) {
@@ -206,12 +188,6 @@ impl ResonatorBank {
     }
 }
 
-/// Band-passes at these Qs pass a fraction of a broadband source; this puts the
-/// bank back in the same neighbourhood as the direct path.
-pub const BANK_MAKEUP: f32 = 3.2;
-
-/// One-pole high-pass. The Pro Soloist had four fixed settings ahead of its
-/// VCF; each voice here picks its own corner.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct OnePoleHp {
     coeff: f32,
@@ -220,12 +196,6 @@ pub struct OnePoleHp {
 }
 
 impl OnePoleHp {
-    pub fn new(cutoff_hz: f32, sample_rate: f32) -> Self {
-        let mut f = Self::default();
-        f.set(cutoff_hz, sample_rate);
-        f
-    }
-
     pub fn set(&mut self, cutoff_hz: f32, sample_rate: f32) {
         let sample_rate = sample_rate.max(1.0);
         let rc = 1.0 / (std::f32::consts::TAU * cutoff_hz.clamp(1.0, sample_rate * 0.45));
@@ -246,8 +216,6 @@ impl OnePoleHp {
     }
 }
 
-/// Fixed 12 Hz blocker on the output, so saturation asymmetry cannot walk the
-/// signal off centre.
 #[derive(Debug, Clone, Copy)]
 pub struct DcBlocker {
     r: f32,
@@ -288,4 +256,23 @@ impl DcBlocker {
         self.prev_in = 0.0;
         self.prev_out = 0.0;
     }
+}
+
+/// Board C series-RC highpasses, R = 12k. A is the brightest.
+pub const HPF_HZ: [f32; 4] = [2_653.0, 603.0, 282.0, 60.0];
+
+/// Four hardware HP switch points. Index 0 = A.
+pub fn hp_from_index(index: u8) -> f32 {
+    HPF_HZ[index.min(3) as usize]
+}
+
+/// Highest enabled section, or 20 Hz if the ROM left them all off.
+pub fn hp_from_mask(mask: u8) -> f32 {
+    let mut hz: f32 = 20.0;
+    for i in 0..4u8 {
+        if mask & (1 << i) != 0 {
+            hz = hz.max(HPF_HZ[i as usize]);
+        }
+    }
+    hz
 }

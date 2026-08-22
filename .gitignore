@@ -8,3 +8,4 @@
 *.cottproj.bak
 autosave/
 *.log
+crates/cott-whistle-dsp/dumps/

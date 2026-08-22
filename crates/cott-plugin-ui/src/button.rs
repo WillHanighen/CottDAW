@@ -107,19 +107,30 @@ fn paint_cap(
     let lamp = pos2(face.left() + 9.0, face.center().y);
     paint_lamp(painter, lamp, 2.8, skin, if selected { 1.0 } else { 0.06 });
 
-    let text_color = if selected { skin.legend } else { skin.legend_dim };
+    let font = (rect.height() * 0.42).clamp(11.0, 15.0);
+    let use_spacing = rect.width() >= 84.0 && label.len() <= 8;
+    let drawn = if use_spacing {
+        spaced(label)
+    } else {
+        label.to_string()
+    };
+    let text_color = if selected {
+        skin.legend
+    } else {
+        mix(skin.legend_dim, skin.legend, 0.55)
+    };
     painter.text(
         pos2(face.left() + 17.0, face.center().y + 1.0),
         Align2::LEFT_CENTER,
-        spaced(label),
-        FontId::proportional(9.5),
+        &drawn,
+        FontId::proportional(font),
         with_alpha(Color32::BLACK, 130),
     );
     painter.text(
         pos2(face.left() + 17.0, face.center().y),
         Align2::LEFT_CENTER,
-        spaced(label),
-        FontId::proportional(9.5),
+        &drawn,
+        FontId::proportional(font),
         text_color,
     );
 }
@@ -129,7 +140,11 @@ pub fn paint_lamp(painter: &Painter, center: Pos2, radius: f32, skin: &Skin, lev
     let level = level.clamp(0.0, 1.0);
     painter.circle_filled(center, radius + 1.5, with_alpha(Color32::BLACK, 140));
     if level > 0.02 {
-        painter.circle_filled(center, radius * 2.4, with_alpha(skin.accent, (level * 55.0) as u8));
+        painter.circle_filled(
+            center,
+            radius * 2.4,
+            with_alpha(skin.accent, (level * 55.0) as u8),
+        );
     }
     painter.circle_filled(
         center,

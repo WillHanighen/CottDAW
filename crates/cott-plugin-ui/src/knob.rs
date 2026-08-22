@@ -154,10 +154,10 @@ pub fn paint_knob(
     enabled: bool,
 ) {
     // Text shrinks with the cell so cramped hosts still get readable dials.
-    let label_h = (rect.height() * 0.16).clamp(8.0, 12.0);
-    let value_h = (rect.height() * 0.20).clamp(9.0, 15.0);
-    let label_font = (label_h * 0.78).clamp(6.5, 9.0);
-    let value_font = (value_h * 0.66).clamp(7.0, 9.5);
+    let label_h = (rect.height() * 0.18).clamp(12.0, 16.0);
+    let value_h = (rect.height() * 0.22).clamp(12.0, 18.0);
+    let label_font = (label_h * 0.82).clamp(10.0, 12.5);
+    let value_font = (value_h * 0.72).clamp(10.0, 13.0);
     let dial_area = Rect::from_min_max(
         pos2(rect.left(), rect.top() + label_h),
         pos2(rect.right(), rect.bottom() - value_h),
@@ -171,9 +171,9 @@ pub fn paint_knob(
         with_alpha(skin.legend_dim, 120)
     };
     let legend = if enabled {
-        skin.legend_dim
+        skin.legend
     } else {
-        with_alpha(skin.legend_dim, 110)
+        with_alpha(skin.legend_dim, 160)
     };
 
     engrave(
@@ -312,7 +312,10 @@ fn paint_cap(
             with_alpha(Color32::BLACK, 46)
         };
         painter.line_segment(
-            [center + dir * (radius * 0.84), center + dir * (radius * 0.98)],
+            [
+                center + dir * (radius * 0.84),
+                center + dir * (radius * 0.98),
+            ],
             Stroke::new(1.0, color),
         );
     }
@@ -342,7 +345,10 @@ fn paint_cap(
     let dir = vec2(a.cos(), a.sin());
     let tip = center + dir * (radius * 0.88);
     painter.line_segment(
-        [center + dir * (radius * 0.26) + vec2(0.0, 1.0), tip + vec2(0.0, 1.0)],
+        [
+            center + dir * (radius * 0.26) + vec2(0.0, 1.0),
+            tip + vec2(0.0, 1.0),
+        ],
         Stroke::new(3.0, with_alpha(Color32::BLACK, 120)),
     );
     painter.line_segment(

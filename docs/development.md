@@ -22,7 +22,7 @@ crates/cott-synth-dsp/     # CottSynth DSP (built-in + VST3)
 crates/cott-synth/         # CottSynth VST3 cdylib
 crates/cott-filter-dsp/    # CottFilter biquad DSP + response probe
 crates/cott-filter/        # CottFilter VST3 cdylib
-crates/cott-whistle-dsp/   # CottWhistle mono pulse/saw G-funk lead DSP (no sine)
+crates/cott-whistle-dsp/   # CottWhistle voice (divider, resonators, 4034)
 crates/cott-whistle/       # CottWhistle VST3 cdylib
 crates/cott-plugin-ui/     # shared skeuomorphic egui panel kit for the VST3s
 crates/cott-xtask/         # nih-plug bundler entry
@@ -79,12 +79,12 @@ cargo test -p cott-core --lib
 # Compile host + worker (smoke that the workspace links)
 cargo build -p cott-daw -p cott-vst-worker
 
-# CottWhistle: engine behaviour, glide, stability, spectra, and the VST3 wrapper
+# CottWhistle: circuit + VST3 panel
 cargo test -p cott-whistle-dsp -p cott-whistle
 cargo check -p cott-whistle && cargo bundle-whistle-debug
 ```
 
-`cott-whistle-dsp` tests cover voice priority and legato, monotonic portamento, sample-accurate MIDI offsets, finite bounded output at 44.1/48/96 kHz, and spectral assertions: every character carries real upper harmonics (none of them resemble a sine), `Worm` shows its 1/14-pulse resonator tilt, the four characters differ from each other, and high notes stay alias-controlled. `cargo run -p cott-whistle-dsp --example audition` prints per-character partial profiles and output levels when retuning by ear.
+Throw a paddle, play a note. Aftertouch (or CC 2) only does something when a touch switch is latched. Harpsichord bypasses the 4034, so Brilliance is dead on that paddle, on purpose.
 
 To open the whistle editor standalone, point the worker at the **bundle directory** (not the inner `.so`, which the scanner cannot resolve):
 
@@ -107,9 +107,8 @@ Useful `cott-core` areas covered by unit tests include tempo/sample conversion, 
 | CottSynth voices / waveforms / ADSR | `cott-synth-dsp` |
 | CottSynth VST3 wrapper | `cott-synth` |
 | CottFilter biquad + response curve | `cott-filter-dsp` |
-| CottWhistle oscillators / ladder / resonators / voice | `cott-whistle-dsp/src/{oscillator,filter,engine}.rs` |
-| CottWhistle character recipes (routing + defaults) | `cott-whistle-dsp/src/character.rs` |
-| CottWhistle `v3-` parameters and panel | `cott-whistle/src/lib.rs` |
+| CottWhistle circuit / recipes | `cott-whistle-dsp` |
+| CottWhistle `v4-` parameters and panel | `cott-whistle/src/lib.rs` |
 | Plugin panel look (chassis, knobs, wells) | `cott-plugin-ui` |
 | First-party plugin catalog entries | `cott-daw/src/builtin_{synth,filter,whistle}.rs` |
 | Engine commands & offline render | `cott-core/src/engine.rs` |
@@ -149,7 +148,7 @@ For yabridge: catalog scan defers VST2/VST3/CLAP wrappers so it does not spawn W
 
 `PROJECT_VERSION = 2` in `cott-core/src/project.rs`. Version 1 VST3 node names deserialize through aliases and default to the VST3 format. Loading a newer version than the binary supports is an error.
 
-Plugin state lives in opaque VST3 blobs and is versioned per plugin, not by `PROJECT_VERSION`. CottWhistle's rebuild kept its class ID but moved every parameter to a `v3-` ID, so earlier whistle blobs match nothing and those instances load the new defaults. Use the same trick — new IDs, same class ID — when a plugin's controls change so much that migrating the old values would produce a wrong patch instead of a missing one.
+Plugin state lives in opaque VST3 blobs and is versioned per plugin, not by `PROJECT_VERSION`. CottWhistle kept its class ID and moved every parameter to a `v4-` ID, so earlier whistle blobs match nothing and those instances load the new defaults. Use the same trick (new IDs, same class ID) when a plugin's controls change so much that migrating the old values would produce a wrong patch instead of a missing one.
 
 ## Style notes
 

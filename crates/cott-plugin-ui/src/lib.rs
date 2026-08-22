@@ -11,8 +11,11 @@ pub mod button;
 pub mod chassis;
 pub mod knob;
 pub mod layout;
+pub mod paddle;
+pub mod scale;
 pub mod scope;
 pub mod skin;
+pub mod slider;
 
 pub use button::{paint_lamp, segment_button};
 pub use chassis::{
@@ -20,11 +23,14 @@ pub use chassis::{
     readout, spaced, with_alpha,
 };
 pub use knob::{display_knob, paint_knob, param_knob, param_knob_enabled};
+pub use paddle::{paddle, PaddleThrow};
+pub use scale::{display_scale, physical_size};
 pub use scope::{
     paint_curve, paint_curve_filled, paint_envelope, paint_grid, paint_marker, paint_waveform,
     ScopeBuffer, SCOPE_LEN,
 };
 pub use skin::{apply_visuals, Skin};
+pub use slider::param_slider;
 
 use nih_plug_egui::egui::{self, Rect, Sense, Ui};
 

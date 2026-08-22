@@ -454,7 +454,7 @@ fn draw_browser(app: &mut CottApp, ui: &mut egui::Ui) {
     ui.text_edit_singleline(&mut app.ui.plugin_filter)
         .on_hover_text("Filter VSTs");
     ui.weak("Click a plugin to load it, or right-click the routing canvas.");
-    ui.weak("CottSynth + CottFilter are always listed (built-in VST3s).");
+    ui.weak("CottSynth, CottFilter, and CottWhistle are always listed (built-in VST3s).");
     if app.is_scanning_plugins() {
         ui.weak("Scanning… (filesystem only; Wine starts when you load a plugin)");
     }

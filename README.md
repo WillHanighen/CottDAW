@@ -63,24 +63,13 @@ cargo bundle-whistle        # → target/bundled/cott-whistle.vst3
 # debug: bundle-synth-debug / bundle-filter-debug / bundle-whistle-debug
 ```
 
-Copy those bundles into `~/.vst3/` (or another host’s VST3 path) to use them outside CottDAW. The DAW injects them into the plugin browser automatically (CottSynth = default MIDI instrument; CottFilter = stereo LP/HP effect; CottWhistle = monophonic G-funk whistle lead).
+Copy those bundles into `~/.vst3/` (or another host's VST3 path) to use them outside CottDAW. The DAW injects them into the plugin browser automatically (CottSynth = default MIDI instrument; CottFilter = stereo LP/HP effect; CottWhistle = monophonic Pro Soloist-style lead).
 
 ### CottWhistle
 
-The "whistle" is a nickname for a filtered, harmonically rich analog lead, **not** a sine oscillator — there is no sine anywhere in the instrument. Every character builds its tone from a narrow pulse, a stepped saw, or a square, then shapes it through a four-pole ladder low-pass and a bank of parallel band-pass resonators. One monophonic voice with last-note priority, legato (no envelope retrigger on overlap), and exponential portamento does the rest.
+Thirty factory paddles, a 4034 ladder, the resonator bank, and a pressure strip. Channel aftertouch (or breath CC 2) drives Bend / Wow / Growl / Brilliance / Volume / Vibrato when those switches are on. Velocity is ignored. Oboe plus the portamento slider is the Funky Worm line; it is not a second synth.
 
-Four characters set the circuit routing and a calibrated set of defaults, which the shared macro knobs then adjust:
-
-| Character | Circuit | Inspired by |
-|-----------|---------|-------------|
-| **Worm** | 1/14 pulse → reed resonator bank → VCF | ARP Pro Soloist "Oboe", *Funky Worm* |
-| **West Coast** | 2' saw + detuned square → ladder | Minimoog G-funk leads |
-| **Silk** | saw-led, soft resonator body | smoother mid-90s leads |
-| **San Andreas** | narrow pulse, tight glide, brighter | game-theme-style lead |
-
-Controls: character, glide, octave, pulse/saw blend, detune, brilliance, emphasis, body, vibrato rate/depth/delay, attack, release, drive, output. Unison and chorus are gone; the single centered voice is sent to both channels so the output stays mono-compatible.
-
-**State reset:** the plugin keeps its name and VST3 class ID (`CottWhstlVST3CE!`) so existing projects still resolve it, but every parameter now uses a `v3-` ID. Earlier whistle state no longer matches any parameter and is ignored — those instances come back with the new defaults rather than a half-mapped patch.
+Class ID stays `CottWhstlVST3CE!`. Parameters use `v4-` IDs, so older `v3-` state loads as the new defaults.
 
 ## Run
 
@@ -113,8 +102,8 @@ cott-vst-worker  (one process per plugin instance)
 - **`cott-core`** — project model, typed DAG, DSP graph compiler, offline render (includes built-in CottSynth)
 - **`cott-synth-dsp` / `cott-synth`** — shared synth engine + redistributable VST3
 - **`cott-filter-dsp` / `cott-filter`** — stereo LP/HP biquad + redistributable VST3
-- **`cott-whistle-dsp` / `cott-whistle`** — monophonic pulse/saw G-funk lead (ladder + resonators, four characters) + redistributable VST3
-- **`cott-plugin-ui`** — shared skeuomorphic panel kit used by all three plugin editors
+- **`cott-whistle-dsp` / `cott-whistle`** — CottWhistle VST3 (Pro Soloist circuit, thirty paddles)
+- **`cott-plugin-ui`** — shared skeuomorphic panel kit used by the first-party plugin editors
 - **`cott-ipc`** — length-prefixed bincode protocol + shared-memory audio/MIDI ring
 - Plugin crashes kill only the worker; the DAW silences/bypasses that node and keeps transport running
 
@@ -124,9 +113,8 @@ cott-vst-worker  (one process per plugin instance)
 cargo test -p cott-core --lib
 cargo build -p cott-daw -p cott-vst-worker
 
-# CottWhistle: DSP behaviour + spectra, then the plugin wrapper
+# CottWhistle: voice + VST3 wrapper
 cargo test -p cott-whistle-dsp -p cott-whistle
-cargo run -p cott-whistle-dsp --example audition   # per-character partials and levels
 ```
 
 ## Limitations

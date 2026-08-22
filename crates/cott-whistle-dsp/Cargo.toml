@@ -3,7 +3,4 @@ name = "cott-whistle-dsp"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Monophonic G-funk whistle lead DSP for CottWhistle VST3"
-
-[dependencies]
-serde = { workspace = true }
+description = "CottWhistle Pro Soloist voice: divider, resonators, 4034, thirty paddles"

@@ -167,7 +167,11 @@ pub fn paint_screw(painter: &Painter, center: Pos2, radius: f32, skin: &Skin) {
         [center - d + vec2(0.0, 1.0), center + d + vec2(0.0, 1.0)],
         Stroke::new(1.0, with_alpha(Color32::WHITE, 26)),
     );
-    painter.circle_stroke(center, radius, Stroke::new(1.0, with_alpha(Color32::BLACK, 120)));
+    painter.circle_stroke(
+        center,
+        radius,
+        Stroke::new(1.0, with_alpha(Color32::BLACK, 120)),
+    );
 }
 
 /// A raised section plate. Returns the padded content rect.
@@ -229,10 +233,10 @@ pub fn plate_legend(painter: &Painter, rect: Rect, skin: &Skin, title: &str) -> 
         baseline,
         Align2::LEFT_TOP,
         &spaced(title),
-        FontId::proportional(10.0),
-        skin.legend_dim,
+        FontId::proportional(12.0),
+        skin.legend,
     );
-    let line_y = rect.top() + 15.5;
+    let line_y = rect.top() + 17.5;
     painter.line_segment(
         [pos2(rect.left(), line_y), pos2(rect.right(), line_y)],
         Stroke::new(1.0, with_alpha(Color32::BLACK, 90)),
@@ -356,20 +360,24 @@ pub fn paint_header(
         pos2(inner.left() + 6.0, inner.center().y - 8.0),
         Align2::LEFT_CENTER,
         &spaced(title),
-        FontId::proportional(17.0),
+        FontId::proportional(18.0),
         skin.legend,
     );
     painter.text(
-        pos2(inner.left() + 7.0, inner.center().y + 11.0),
+        pos2(inner.left() + 7.0, inner.center().y + 12.0),
         Align2::LEFT_CENTER,
-        spaced(subtitle),
-        FontId::monospace(9.0),
-        skin.legend_dim,
+        subtitle,
+        FontId::monospace(11.0),
+        skin.legend,
     );
 
     // Jewel LED: bezel, glow proportional to output, glass highlight.
     let level = level.clamp(0.0, 1.0);
-    painter.circle_filled(jewel, jewel_r + 2.0, mix(skin.cap_dark, Color32::BLACK, 0.4));
+    painter.circle_filled(
+        jewel,
+        jewel_r + 2.0,
+        mix(skin.cap_dark, Color32::BLACK, 0.4),
+    );
     painter.circle_stroke(
         jewel,
         jewel_r + 2.0,
