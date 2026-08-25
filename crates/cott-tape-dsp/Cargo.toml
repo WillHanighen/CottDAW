@@ -1,8 +1,0 @@
-[package]
-name = "cott-tape-dsp"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-description = "Stereo tape delay DSP for CottTape (wow, dark repeats, drive)"
-
-[dependencies]

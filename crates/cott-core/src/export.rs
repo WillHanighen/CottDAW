@@ -172,17 +172,25 @@ pub fn write_wav_file(stereo: &AudioBuffer, sample_rate: u32, out_path: &Path) -
     let mut writer = hound::WavWriter::create(out_path, spec).context("create wav")?;
     let frames = stereo.frames();
     for i in 0..frames {
-        let l = (stereo.channels[0][i].clamp(-1.0, 1.0) * 32767.0) as i16;
+        writer.write_sample(pcm16(stereo.channels[0][i]))?;
         let r = stereo
             .channels
             .get(1)
-            .map(|c| (c[i].clamp(-1.0, 1.0) * 32767.0) as i16)
-            .unwrap_or(l);
-        writer.write_sample(l)?;
+            .map(|c| pcm16(c[i]))
+            .unwrap_or_else(|| pcm16(stereo.channels[0][i]));
         writer.write_sample(r)?;
     }
     writer.finalize()?;
     Ok(())
+}
+
+fn pcm16(sample: f32) -> i16 {
+    let sample = if sample.is_finite() {
+        sample.clamp(-1.0, 1.0)
+    } else {
+        0.0
+    };
+    (sample * 32767.0) as i16
 }
 
 /// Convenience for tests that don't need Opus.

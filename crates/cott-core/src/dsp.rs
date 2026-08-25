@@ -562,7 +562,7 @@ pub fn process_block(
     // Soft clip master lightly.
     for ch in &mut master.channels {
         for s in ch.iter_mut() {
-            *s = s.clamp(-1.0, 1.0);
+            *s = if s.is_finite() { s.clamp(-1.0, 1.0) } else { 0.0 };
         }
     }
     master

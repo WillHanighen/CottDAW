@@ -130,6 +130,8 @@ pub enum HostToWorker {
         transport: TransportInfo,
         frames: u32,
     },
+    /// Clear voices, delay lines, and other activation state before a bounce.
+    Reset,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -167,6 +169,7 @@ pub enum WorkerToHost {
     EditorFailed {
         message: String,
     },
+    ResetDone,
     Crashed {
         message: String,
     },

@@ -185,6 +185,13 @@ impl PluginBackend {
             Self::Vst2(plugin) => plugin.process(shm, transport),
         }
     }
+
+    pub fn reset(&mut self) {
+        match self {
+            Self::Rack(plugin) => plugin.reset_dsp(),
+            Self::Vst2(_) => {}
+        }
+    }
 }
 
 pub fn scan_paths(paths: &[PathBuf]) -> Result<Vec<PluginDescriptor>> {
@@ -922,6 +929,22 @@ impl VstPlugin {
         // Echo GUI performEdit → processor (nih-plug needs this while audio runs).
         self.plugin.flush_pending_params();
         true
+    }
+
+    /// Drop voices and delay state so a bounce does not start with live tails.
+    pub fn reset_dsp(&mut self) {
+        let Some(layout) = self.plugin.plugin().active_layout().cloned() else {
+            return;
+        };
+        self.plugin.plugin_mut().deactivate();
+        if let Err(e) = self
+            .plugin
+            .plugin_mut()
+            .activate(layout, self.sample_rate, self.block_size)
+        {
+            warn!("plugin reset activate failed: {e:#}");
+        }
+        self.refresh_latency();
     }
 
     pub fn process(&mut self, shm: &mut SharedAudioRegion, transport: &TransportInfo) -> bool {

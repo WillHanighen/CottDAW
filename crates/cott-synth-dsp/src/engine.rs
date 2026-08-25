@@ -1,10 +1,23 @@
 use crate::adsr::{AdsrParams, AdsrState};
+use crate::delay::DelayLine;
 use crate::midi_note_to_hz;
-use crate::oscillator::{Waveform, sample_waveform};
+use crate::oscillator::{Oscillator, Waveform};
 use serde::{Deserialize, Serialize};
 
 /// Maximum simultaneous voices per synth instance.
 pub const MAX_VOICES: usize = 16;
+
+fn default_super_detune() -> f32 {
+    0.5
+}
+
+fn default_super_mix() -> f32 {
+    0.75
+}
+
+fn default_delay() -> f32 {
+    0.0
+}
 
 /// User-facing synth parameters (persisted on the graph node / plugin state).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -13,7 +26,16 @@ pub struct SynthParams {
     pub adsr: AdsrParams,
     /// Pulse duty cycle in `[0, 1]` (only for [`Waveform::Pulse`]).
     pub pulse_width: f32,
-    /// Linear output gain.
+    /// Super Saw detune amount in `[0, 1]`.
+    #[serde(default = "default_super_detune")]
+    pub super_detune: f32,
+    /// Super Saw side/center mix in `[0, 1]`.
+    #[serde(default = "default_super_mix")]
+    pub super_mix: f32,
+    /// Delay wet mix in `[0, 1]`. Time and feedback are fixed.
+    #[serde(default = "default_delay")]
+    pub delay: f32,
+    /// Linear output gain, applied before a `tanh` saturator.
     pub gain: f32,
 }
 
@@ -23,6 +45,9 @@ impl Default for SynthParams {
             waveform: Waveform::Sine,
             adsr: AdsrParams::default(),
             pulse_width: 0.25,
+            super_detune: default_super_detune(),
+            super_mix: default_super_mix(),
+            delay: default_delay(),
             gain: 0.25,
         }
     }
@@ -34,6 +59,9 @@ impl SynthParams {
             waveform: self.waveform,
             adsr: self.adsr.clamped(),
             pulse_width: self.pulse_width.clamp(0.05, 0.95),
+            super_detune: self.super_detune.clamp(0.0, 1.0),
+            super_mix: self.super_mix.clamp(0.0, 1.0),
+            delay: self.delay.clamp(0.0, 1.0),
             gain: self.gain.clamp(0.0, 1.0),
         }
     }
@@ -54,10 +82,9 @@ struct Voice {
     note: u8,
     channel: u8,
     velocity: f32,
-    phase: f32,
-    phase_inc: f32,
+    freq: f32,
+    osc: Oscillator,
     envelope: AdsrState,
-    noise_state: u32,
     /// Monotonic age for voice stealing (lower = older).
     age: u64,
 }
@@ -68,6 +95,7 @@ pub struct PolySynth {
     voices: [Option<Voice>; MAX_VOICES],
     next_age: u64,
     sample_rate: f32,
+    delay: DelayLine,
 }
 
 impl Default for PolySynth {
@@ -78,15 +106,18 @@ impl Default for PolySynth {
 
 impl PolySynth {
     pub fn new(sample_rate: f32) -> Self {
+        let sample_rate = sample_rate.max(1.0);
         Self {
             voices: std::array::from_fn(|_| None),
             next_age: 1,
-            sample_rate: sample_rate.max(1.0),
+            sample_rate,
+            delay: DelayLine::new(sample_rate),
         }
     }
 
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
         self.sample_rate = sample_rate.max(1.0);
+        self.delay.set_sample_rate(self.sample_rate);
     }
 
     pub fn sample_rate(&self) -> f32 {
@@ -100,14 +131,13 @@ impl PolySynth {
     pub fn reset(&mut self) {
         self.voices.fill(None);
         self.next_age = 1;
+        self.delay.reset();
     }
 
     pub fn all_notes_off(&mut self, params: &SynthParams) {
         let params = params.clamped();
-        for slot in &mut self.voices {
-            if let Some(voice) = slot {
-                voice.envelope.note_off(&params.adsr, self.sample_rate);
-            }
+        for voice in self.voices.iter_mut().flatten() {
+            voice.envelope.note_off(&params.adsr, self.sample_rate);
         }
     }
 
@@ -119,22 +149,21 @@ impl PolySynth {
             return;
         }
         let params = params.clamped();
+        let freq = midi_note_to_hz(note);
 
-        // Retrigger same note/channel.
-        if let Some(slot) = self
+        // Retrigger same note/channel — keep the oscillator running.
+        if let Some(voice) = self
             .voices
             .iter_mut()
-            .find(|v| v.as_ref().is_some_and(|voice| voice.note == note && voice.channel == channel))
+            .flatten()
+            .find(|voice| voice.note == note && voice.channel == channel)
         {
-            if let Some(voice) = slot {
-                voice.velocity = velocity as f32 / 127.0;
-                voice.phase = 0.0;
-                voice.phase_inc = midi_note_to_hz(note) / self.sample_rate;
-                voice.envelope.note_on(&params.adsr, self.sample_rate);
-                voice.age = self.next_age;
-                self.next_age = self.next_age.wrapping_add(1);
-                return;
-            }
+            voice.velocity = velocity as f32 / 127.0;
+            voice.freq = freq;
+            voice.envelope.note_on(&params.adsr, self.sample_rate);
+            voice.age = self.next_age;
+            self.next_age = self.next_age.wrapping_add(1);
+            return;
         }
 
         let idx = self
@@ -147,14 +176,16 @@ impl PolySynth {
         self.next_age = self.next_age.wrapping_add(1);
         let mut envelope = AdsrState::default();
         envelope.note_on(&params.adsr, self.sample_rate);
+        let seed = 0xA341_316C
+            ^ (note as u32).wrapping_mul(0x9E37_79B9)
+            ^ (age as u32).wrapping_mul(0x85EB_CA6B);
         self.voices[idx] = Some(Voice {
             note,
             channel: channel & 0x0f,
             velocity: velocity as f32 / 127.0,
-            phase: 0.0,
-            phase_inc: midi_note_to_hz(note) / self.sample_rate,
+            freq,
+            osc: Oscillator::new(seed),
             envelope,
-            noise_state: 0xA341_316C ^ (note as u32).wrapping_mul(0x9E37_79B9),
             age,
         });
     }
@@ -206,20 +237,27 @@ impl PolySynth {
                     *slot = None;
                     continue;
                 }
-                let sample = sample_waveform(
+                let sample = voice.osc.tick(
                     params.waveform,
-                    voice.phase,
+                    voice.freq,
+                    self.sample_rate,
                     params.pulse_width,
-                    &mut voice.noise_state,
+                    params.super_detune,
+                    params.super_mix,
                 );
                 mix += sample * env * voice.velocity;
-                voice.phase += voice.phase_inc;
-                if voice.phase >= 1.0 {
-                    voice.phase -= voice.phase.floor();
-                }
             }
 
-            let out = (mix * params.gain).clamp(-1.0, 1.0);
+            let dry = mix * params.gain;
+            // Mix 0 must not read the delay: NaN * 0 is still NaN, and the WAV
+            // writer used to turn that into garbage integers.
+            let mixed = if params.delay <= 1.0e-4 {
+                dry
+            } else {
+                dry + self.delay.tick(dry) * params.delay
+            };
+            let out = mixed.tanh();
+            let out = if out.is_finite() { out } else { 0.0 };
             left[frame] = out;
             right[frame] = out;
         }
@@ -336,5 +374,34 @@ mod tests {
         let mut r = vec![0.0f32; 32];
         synth.process_block(&params, &[off(0, 60)], &mut l, &mut r);
         assert_eq!(synth.active_voices(), 0);
+    }
+
+    #[test]
+    fn delay_keeps_echoing_after_notes_end() {
+        let mut synth = PolySynth::new(1_000.0);
+        let params = SynthParams {
+            adsr: AdsrParams {
+                attack_ms: 0.0,
+                decay_ms: 0.0,
+                sustain: 1.0,
+                release_ms: 0.0,
+            },
+            delay: 1.0,
+            gain: 1.0,
+            ..SynthParams::default()
+        };
+        let delay_frames = (crate::delay::DELAY_TIME_SEC * 1_000.0).round() as usize + 8;
+        let mut l = vec![0.0f32; 4];
+        let mut r = vec![0.0f32; 4];
+        synth.process_block(&params, &[on(0, 60, 127)], &mut l, &mut r);
+        synth.process_block(&params, &[off(0, 60)], &mut l, &mut r);
+        assert_eq!(synth.active_voices(), 0);
+        let mut l = vec![0.0f32; delay_frames];
+        let mut r = vec![0.0f32; delay_frames];
+        synth.process_block(&params, &[], &mut l, &mut r);
+        assert!(
+            l.iter().any(|s| s.abs() > 1e-3),
+            "delay mix 1 should still ring after note-off"
+        );
     }
 }

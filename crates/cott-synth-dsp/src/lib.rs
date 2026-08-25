@@ -3,12 +3,13 @@
 //! Shared by the built-in DAW instrument node and the redistributable VST3.
 
 mod adsr;
+mod delay;
 mod engine;
 mod oscillator;
 
 pub use adsr::{AdsrParams, AdsrStage, AdsrState};
 pub use engine::{MidiNoteEvent, PolySynth, SynthParams, MAX_VOICES};
-pub use oscillator::{Waveform, sample_waveform};
+pub use oscillator::{Oscillator, Waveform, sample_waveform};
 
 /// MIDI note number → frequency in Hz (A4 = 440 Hz at note 69).
 #[inline]

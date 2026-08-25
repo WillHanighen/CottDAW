@@ -8,7 +8,7 @@ use cpal::{BufferSize, SampleFormat, StreamConfig};
 use parking_lot::Mutex;
 use rtrb::{Consumer, Producer};
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::{info, warn};
 
 pub struct AudioEngine {
@@ -20,6 +20,8 @@ pub struct AudioEngine {
     pub buffer_size: u32,
     pub plugin_host: Arc<Mutex<crate::plugins::PluginHost>>,
     pub running: Arc<AtomicBool>,
+    /// Set while a bounce owns the plugin workers. The callback outputs silence.
+    pub exporting: Arc<AtomicBool>,
 }
 
 impl AudioEngine {
@@ -55,18 +57,25 @@ impl AudioEngine {
         let (cmd_tx, mut cmd_rx) = rtrb::RingBuffer::new(256);
         let (mut evt_tx, evt_rx) = rtrb::RingBuffer::new(256);
         let running = Arc::new(AtomicBool::new(true));
+        let exporting = Arc::new(AtomicBool::new(false));
 
         let mut processor = AudioProcessor::new(Arc::clone(&shared));
         let plugin_host_cb = Arc::clone(&plugin_host);
+        let exporting_cb = Arc::clone(&exporting);
         let err_fn = |e| warn!("audio stream error: {e}");
 
         let stream = device.build_output_stream(
             config,
             move |data: &mut [f32], _| {
                 processor.handle_commands(&mut cmd_rx);
+                if exporting_cb.load(Ordering::Acquire) {
+                    data.fill(0.0);
+                    return;
+                }
                 let frames = data.len() / channels.max(1);
                 let mut host_audio = HostPluginAudio {
                     inner: Arc::clone(&plugin_host_cb),
+                    offline: false,
                 };
                 processor.process(
                     data,
@@ -93,6 +102,7 @@ impl AudioEngine {
             buffer_size,
             plugin_host,
             running,
+            exporting,
         })
     }
 }

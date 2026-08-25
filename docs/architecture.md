@@ -17,18 +17,10 @@ crates/
   cott-vst-worker/    Sandboxed multi-format process (load, process, X11 editor)
   cott-synth-dsp/     Shared CottSynth voices / oscillators / ADSR
   cott-synth/         Redistributable VST3 wrapper (nih-plug)
-  cott-haze-dsp/      CottHaze electric-piano voices / tape / dust
-  cott-haze/          Redistributable CottHaze VST3
+  cott-filter-dsp/    CottFilter biquad DSP
+  cott-filter/        Redistributable CottFilter VST3
   cott-vinyl-dsp/     CottVinyl pops / hiss / muffle / rumble
   cott-vinyl/         Redistributable CottVinyl VST3
-  cott-tape-dsp/      CottTape wow / dark repeats
-  cott-tape/          Redistributable CottTape VST3
-  cott-bass-dsp/      CottBass sub + body
-  cott-bass/          Redistributable CottBass VST3
-  cott-pluck-dsp/     CottPluck Karplus-Strong guitar
-  cott-pluck/         Redistributable CottPluck VST3
-  cott-kit-dsp/       CottKit synth drums
-  cott-kit/           Redistributable CottKit VST3
   cott-xtask/         `cargo bundle-synth` bundler
 vendor/
   truce-rack-vst3/    Patched VST3 bindings (ModuleEntry before GetPluginFactory)
@@ -42,18 +34,10 @@ vendor/
 | `cott-vst-worker` | One plugin instance; scan mode or process mode |
 | `cott-synth-dsp` | Polyphonic CottSynth DSP shared by the built-in node and VST3 |
 | `cott-synth` | VST3 `cdylib` for redistribution outside CottDAW |
-| `cott-haze-dsp` | Polyphonic CottHaze electric piano, tape flutter, vinyl dust |
-| `cott-haze` | CottHaze VST3 `cdylib` |
+| `cott-filter-dsp` | Stereo LP/HP biquad |
+| `cott-filter` | CottFilter VST3 `cdylib` |
 | `cott-vinyl-dsp` | Stereo vinyl wear: pops, hiss, rumble, Dusty / Radio / Tape |
 | `cott-vinyl` | CottVinyl VST3 `cdylib` |
-| `cott-tape-dsp` | Stereo tape delay with wow and dark repeats |
-| `cott-tape` | CottTape VST3 `cdylib` |
-| `cott-bass-dsp` | Mono CottBass sub + folded body |
-| `cott-bass` | CottBass VST3 `cdylib` |
-| `cott-pluck-dsp` | Six-voice Karplus-Strong CottPluck |
-| `cott-pluck` | CottPluck VST3 `cdylib` |
-| `cott-kit-dsp` | Synthesized CottKit drums + dirt |
-| `cott-kit` | CottKit VST3 `cdylib` |
 
 Workspace root patches `truce-rack-vst3` so Linux/yabridge chainloaders call `ModuleEntry` before `GetPluginFactory`.
 
@@ -140,7 +124,7 @@ Targets: `NodeGain`, `NodePan`, `PluginParam`. Points are beat + normalized valu
 
 ### Offline
 
-`engine::render_offline` uses the same `process_block` path with `TransportState::Playing`. Export and tests share this code.
+`engine::render_offline` uses the same `process_block` path with `TransportState::Playing`. Export and tests share this code. The live audio callback is muted for the bounce so it cannot process the same plugin workers in parallel; plugins are reset before and after render.
 
 ## Plugin sandboxing
 
@@ -156,9 +140,9 @@ Binary resolution: sibling of `cott-daw`, else `target/debug|release/cott-vst-wo
 
 Length-prefixed **bincode** messages. `PROTOCOL_VERSION = 3`; each descriptor/load request carries `PluginFormat`.
 
-**Host → worker:** `Hello`, `ScanPaths`, `Load`, `Unload`, `SetParam`, `GetParams`, `GetState` / `SetState`, `OpenEditor` / `CloseEditor`, `ProcessNotify`, `OfflineProcess`, `Shutdown`.
+**Host → worker:** `Hello`, `ScanPaths`, `Load`, `Unload`, `SetParam`, `GetParams`, `GetState` / `SetState`, `OpenEditor` / `CloseEditor`, `ProcessNotify`, `OfflineProcess`, `Reset`, `Shutdown`.
 
-**Worker → host:** `HelloAck`, `ScanResult`, `Loaded` / `LoadFailed`, `Params`, `State`, `ProcessDone`, editor status, `Crashed`, `Log`, …
+**Worker → host:** `HelloAck`, `ScanResult`, `Loaded` / `LoadFailed`, `Params`, `State`, `ProcessDone`, `ResetDone`, editor status, `Crashed`, `Log`, …
 
 ### Shared memory
 

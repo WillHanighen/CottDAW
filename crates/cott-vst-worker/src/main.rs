@@ -243,6 +243,12 @@ fn handle_message(
             }
             send(stream, &WorkerToHost::EditorClosed)?;
         }
+        HostToWorker::Reset => {
+            if let Some(plugin) = backend.as_mut() {
+                plugin.reset();
+            }
+            send(stream, &WorkerToHost::ResetDone)?;
+        }
         HostToWorker::ProcessNotify { transport }
         | HostToWorker::OfflineProcess { transport, .. } => {
             // Capture the request identity so a late completion cannot be

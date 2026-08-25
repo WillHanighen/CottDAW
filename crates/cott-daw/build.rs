@@ -24,18 +24,7 @@ fn main() {
             "CottFilter",
             "bundle-filter",
         ),
-        (
-            "cott-whistle",
-            "COTT_WHISTLE_VST3",
-            "CottWhistle",
-            "bundle-whistle",
-        ),
-        ("cott-haze", "COTT_HAZE_VST3", "CottHaze", "bundle-haze"),
         ("cott-vinyl", "COTT_VINYL_VST3", "CottVinyl", "bundle-vinyl"),
-        ("cott-tape", "COTT_TAPE_VST3", "CottTape", "bundle-tape"),
-        ("cott-bass", "COTT_BASS_VST3", "CottBass", "bundle-bass"),
-        ("cott-pluck", "COTT_PLUCK_VST3", "CottPluck", "bundle-pluck"),
-        ("cott-kit", "COTT_KIT_VST3", "CottKit", "bundle-kit"),
     ] {
         println!("cargo:rerun-if-changed=../{stem}/src");
         println!("cargo:rerun-if-changed=../{stem}/Cargo.toml");

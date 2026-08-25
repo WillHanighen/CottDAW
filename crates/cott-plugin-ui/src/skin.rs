@@ -54,15 +54,6 @@ impl Skin {
         }
     }
 
-    /// CottWhistle — warm amber.
-    pub const fn amber() -> Self {
-        Self::chassis(
-            Color32::from_rgb(255, 176, 74),
-            Color32::from_rgb(118, 74, 30),
-            Color32::from_rgb(255, 208, 146),
-        )
-    }
-
     /// CottSynth — the existing teal.
     pub const fn teal() -> Self {
         Self::chassis(
@@ -81,39 +72,12 @@ impl Skin {
         )
     }
 
-    /// CottHaze — dusty rose.
-    pub const fn dusk() -> Self {
-        Self::chassis(
-            Color32::from_rgb(224, 138, 152),
-            Color32::from_rgb(96, 48, 58),
-            Color32::from_rgb(255, 198, 204),
-        )
-    }
-
-    /// CottVinyl / CottTape — worn gold.
+    /// CottVinyl — worn gold.
     pub const fn grain() -> Self {
         Self::chassis(
             Color32::from_rgb(214, 176, 98),
             Color32::from_rgb(92, 68, 28),
             Color32::from_rgb(255, 224, 160),
-        )
-    }
-
-    /// CottPluck — rust.
-    pub const fn rust() -> Self {
-        Self::chassis(
-            Color32::from_rgb(214, 118, 74),
-            Color32::from_rgb(96, 46, 28),
-            Color32::from_rgb(255, 186, 140),
-        )
-    }
-
-    /// CottKit — ink.
-    pub const fn ink() -> Self {
-        Self::chassis(
-            Color32::from_rgb(168, 142, 214),
-            Color32::from_rgb(58, 44, 88),
-            Color32::from_rgb(214, 198, 246),
         )
     }
 }

@@ -107,21 +107,11 @@ pub fn inject_cott_vinyl(catalog: &mut Vec<PluginDescriptor>) {
     catalog.insert(insert_position(catalog), desc);
 }
 
-/// Right after CottHaze so the Cottage plugins stay grouped.
+/// Right after CottFilter so the Cottage plugins stay grouped.
 fn insert_position(catalog: &[PluginDescriptor]) -> usize {
     catalog
         .iter()
-        .position(|p| p.name == crate::builtin_haze::COTT_HAZE_NAME)
-        .or_else(|| {
-            catalog
-                .iter()
-                .position(|p| p.name == crate::builtin_whistle::COTT_WHISTLE_NAME)
-        })
-        .or_else(|| {
-            catalog
-                .iter()
-                .position(|p| p.name == crate::builtin_filter::COTT_FILTER_NAME)
-        })
+        .position(|p| p.name == crate::builtin_filter::COTT_FILTER_NAME)
         .or_else(|| {
             catalog
                 .iter()

@@ -22,20 +22,8 @@ crates/cott-synth-dsp/     # CottSynth DSP (built-in + VST3)
 crates/cott-synth/         # CottSynth VST3 cdylib
 crates/cott-filter-dsp/    # CottFilter biquad DSP + response probe
 crates/cott-filter/        # CottFilter VST3 cdylib
-crates/cott-whistle-dsp/   # CottWhistle voice (divider, resonators, 4034)
-crates/cott-whistle/       # CottWhistle VST3 cdylib
-crates/cott-haze-dsp/      # CottHaze voices (electric piano, tape, dust)
-crates/cott-haze/          # CottHaze VST3 cdylib
 crates/cott-vinyl-dsp/     # CottVinyl wear (pops, hiss, muffle, rumble)
 crates/cott-vinyl/         # CottVinyl VST3 cdylib
-crates/cott-tape-dsp/      # CottTape delay
-crates/cott-tape/          # CottTape VST3 cdylib
-crates/cott-bass-dsp/      # CottBass sub
-crates/cott-bass/          # CottBass VST3 cdylib
-crates/cott-pluck-dsp/     # CottPluck guitar
-crates/cott-pluck/         # CottPluck VST3 cdylib
-crates/cott-kit-dsp/       # CottKit drums
-crates/cott-kit/           # CottKit VST3 cdylib
 crates/cott-plugin-ui/     # shared skeuomorphic egui panel kit for the VST3s
 crates/cott-xtask/         # nih-plug bundler entry
 vendor/truce-rack-vst3/    # patched VST3 host bindings
@@ -53,12 +41,9 @@ Default member is `cott-daw`.
 
 # Or manually (one alias per first-party plugin):
 cargo bundle-synth-debug && cargo bundle-filter-debug && cargo bundle-vinyl-debug \
-  && cargo bundle-whistle-debug && cargo bundle-haze-debug && cargo bundle-tape-debug \
-  && cargo bundle-bass-debug && cargo bundle-pluck-debug && cargo bundle-kit-debug \
   && cargo build -p cott-daw -p cott-vst-worker
-cargo bundle-synth && cargo bundle-filter && cargo bundle-vinyl && cargo bundle-whistle \
-  && cargo bundle-haze && cargo bundle-tape && cargo bundle-bass && cargo bundle-pluck \
-  && cargo bundle-kit && cargo build --release -p cott-daw -p cott-vst-worker
+cargo bundle-synth && cargo bundle-filter && cargo bundle-vinyl \
+  && cargo build --release -p cott-daw -p cott-vst-worker
 ```
 
 The DAW always lists the first-party VST3s in the browser and loads the bundles under `target/bundled/` through the worker. Bundle before building `cott-daw` so `build.rs` can embed the absolute paths.
@@ -66,7 +51,7 @@ The DAW always lists the first-party VST3s in the browser and loads the bundles 
 Install the same bundles for other hosts with:
 
 ```bash
-cp -a target/bundled/cott-{synth,filter,vinyl,whistle,haze,tape,bass,pluck,kit}.vst3 ~/.vst3/
+cp -a target/bundled/cott-{synth,filter,vinyl}.vst3 ~/.vst3/
 ```
 
 The host resolves the worker binary as:
@@ -94,29 +79,15 @@ cargo test -p cott-core --lib
 # Compile host + worker (smoke that the workspace links)
 cargo build -p cott-daw -p cott-vst-worker
 
-# CottWhistle: circuit + VST3 panel
-cargo test -p cott-whistle-dsp -p cott-whistle
-cargo check -p cott-whistle && cargo bundle-whistle-debug
-
-# CottHaze: electric piano + VST3 panel
-cargo test -p cott-haze-dsp -p cott-haze
-cargo check -p cott-haze && cargo bundle-haze-debug
-
 # CottVinyl: wear + VST3 panel
 cargo test -p cott-vinyl-dsp -p cott-vinyl
 cargo check -p cott-vinyl && cargo bundle-vinyl-debug
-
-# Lofi suite
-cargo test -p cott-tape-dsp -p cott-tape -p cott-bass-dsp -p cott-bass \
-  -p cott-pluck-dsp -p cott-pluck -p cott-kit-dsp -p cott-kit
 ```
 
-Throw a paddle, play a note. Aftertouch (or CC 2) only does something when a touch switch is latched. Harpsichord bypasses the 4034, so Brilliance is dead on that paddle, on purpose.
-
-To open the whistle editor standalone, point the worker at the **bundle directory** (not the inner `.so`, which the scanner cannot resolve):
+To open an editor standalone, point the worker at the **bundle directory** (not the inner `.so`, which the scanner cannot resolve):
 
 ```bash
-RUST_LOG=info ./target/debug/cott-vst-worker --probe-editor "$PWD/target/bundled/cott-whistle.vst3"
+RUST_LOG=info ./target/debug/cott-vst-worker --probe-editor "$PWD/target/bundled/cott-synth.vst3"
 ```
 
 There is no fake in-process plugin path anymore; plugin IPC is exercised against real `cott-vst-worker` builds when testing by hand.
@@ -134,16 +105,8 @@ Useful `cott-core` areas covered by unit tests include tempo/sample conversion, 
 | CottSynth voices / waveforms / ADSR | `cott-synth-dsp` |
 | CottSynth VST3 wrapper | `cott-synth` |
 | CottFilter biquad + response curve | `cott-filter-dsp` |
-| CottWhistle circuit / recipes | `cott-whistle-dsp` |
-| CottWhistle `v4-` parameters and panel | `cott-whistle/src/lib.rs` |
-| CottHaze voices / tape / dust | `cott-haze-dsp` |
-| CottHaze VST3 wrapper | `cott-haze` |
 | CottVinyl pops / hiss / rumble / Dusty-Radio-Tape wear | `cott-vinyl-dsp` |
 | CottVinyl VST3 wrapper | `cott-vinyl` |
-| CottTape delay | `cott-tape-dsp` / `cott-tape` |
-| CottBass sub | `cott-bass-dsp` / `cott-bass` |
-| CottPluck guitar | `cott-pluck-dsp` / `cott-pluck` |
-| CottKit drums | `cott-kit-dsp` / `cott-kit` |
 | Plugin panel look (chassis, knobs, wells) | `cott-plugin-ui` |
 | First-party plugin catalog entries | `cott-daw/src/builtin_*.rs` |
 | Engine commands & offline render | `cott-core/src/engine.rs` |
@@ -183,7 +146,7 @@ For yabridge: catalog scan defers VST2/VST3/CLAP wrappers so it does not spawn W
 
 `PROJECT_VERSION = 2` in `cott-core/src/project.rs`. Version 1 VST3 node names deserialize through aliases and default to the VST3 format. Loading a newer version than the binary supports is an error.
 
-Plugin state lives in opaque VST3 blobs and is versioned per plugin, not by `PROJECT_VERSION`. CottWhistle kept its class ID and moved every parameter to a `v4-` ID, so earlier whistle blobs match nothing and those instances load the new defaults. Use the same trick (new IDs, same class ID) when a plugin's controls change so much that migrating the old values would produce a wrong patch instead of a missing one.
+Plugin state lives in opaque VST3 blobs and is versioned per plugin, not by `PROJECT_VERSION`. When a plugin's controls change so much that migrating the old values would produce a wrong patch, keep the class ID and give every parameter a new ID so earlier blobs match nothing and those instances load the new defaults.
 
 ## Style notes
 

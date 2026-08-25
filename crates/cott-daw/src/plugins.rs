@@ -55,13 +55,7 @@ impl PluginHost {
         let mut catalog = Vec::new();
         crate::builtin_synth::inject_cott_synth(&mut catalog);
         crate::builtin_filter::inject_cott_filter(&mut catalog);
-        crate::builtin_whistle::inject_cott_whistle(&mut catalog);
-        crate::builtin_haze::inject_cott_haze(&mut catalog);
         crate::builtin_vinyl::inject_cott_vinyl(&mut catalog);
-        crate::builtin_tape::inject_cott_tape(&mut catalog);
-        crate::builtin_bass::inject_cott_bass(&mut catalog);
-        crate::builtin_pluck::inject_cott_pluck(&mut catalog);
-        crate::builtin_kit::inject_cott_kit(&mut catalog);
         Self {
             catalog,
             instances: IndexMap::new(),
@@ -74,13 +68,7 @@ impl PluginHost {
     pub fn set_catalog_from_scan(&mut self, mut catalog: Vec<PluginDescriptor>) {
         crate::builtin_synth::inject_cott_synth(&mut catalog);
         crate::builtin_filter::inject_cott_filter(&mut catalog);
-        crate::builtin_whistle::inject_cott_whistle(&mut catalog);
-        crate::builtin_haze::inject_cott_haze(&mut catalog);
         crate::builtin_vinyl::inject_cott_vinyl(&mut catalog);
-        crate::builtin_tape::inject_cott_tape(&mut catalog);
-        crate::builtin_bass::inject_cott_bass(&mut catalog);
-        crate::builtin_pluck::inject_cott_pluck(&mut catalog);
-        crate::builtin_kit::inject_cott_kit(&mut catalog);
         self.catalog = catalog;
     }
 
@@ -365,6 +353,13 @@ impl PluginHost {
         };
         self.load(id, format, &uid, &path, sample_rate, block_size, state)
     }
+
+    /// Clear plugin DSP so a bounce does not start from live voices or delay tails.
+    pub fn reset_all(&mut self) {
+        for inst in self.instances.values_mut() {
+            inst.reset();
+        }
+    }
 }
 
 impl PluginInstance {
@@ -381,12 +376,46 @@ impl PluginInstance {
         let _ = std::fs::remove_file(&self.sock_path);
     }
 
+    fn reset(&mut self) {
+        let Some(stream) = self.stream.as_mut() else {
+            return;
+        };
+        if send(stream, &HostToWorker::Reset).is_err() {
+            warn!("plugin {} reset send failed", self.name);
+            return;
+        }
+        let start = Instant::now();
+        let timeout = Duration::from_secs(2);
+        loop {
+            let remaining = timeout.saturating_sub(start.elapsed());
+            if remaining.is_zero() {
+                warn!("plugin {} reset timed out", self.name);
+                return;
+            }
+            match recv_timeout(stream, remaining) {
+                Ok(WorkerToHost::ResetDone) => return,
+                Ok(WorkerToHost::ProcessDone { .. }) => {
+                    // Stale completion from a block that timed out before mute.
+                }
+                Ok(other) => {
+                    warn!("plugin {} reset: unexpected {other:?}", self.name);
+                    return;
+                }
+                Err(e) => {
+                    warn!("plugin {} reset failed: {e}", self.name);
+                    return;
+                }
+            }
+        }
+    }
+
     fn process_block(
         &mut self,
         midi: &[cott_core::clips::ScheduledMidiEvent],
         input: Option<&AudioBuffer>,
         output: &mut AudioBuffer,
         ctx: &TransportBlockInfo,
+        offline: bool,
     ) -> bool {
         if self.failed {
             render_fallback(input, output);
@@ -467,13 +496,26 @@ impl PluginInstance {
             render_fallback(input, output);
             return false;
         };
-        if send(stream, &HostToWorker::ProcessNotify { transport }).is_err() {
+        let notify = if offline {
+            HostToWorker::OfflineProcess {
+                transport,
+                frames: frames as u32,
+            }
+        } else {
+            HostToWorker::ProcessNotify { transport }
+        };
+        if send(stream, &notify).is_err() {
             self.failed = true;
             self.fail_message = Some("IPC send failed".into());
             render_fallback(input, output);
             return false;
         }
-        match recv_process_done(stream, expected_sequence, Duration::from_millis(50)) {
+        let timeout = if offline {
+            Duration::from_secs(5)
+        } else {
+            Duration::from_millis(50)
+        };
+        match recv_process_done(stream, expected_sequence, timeout) {
             Ok((latency, ok, message)) => {
                 self.latency = latency;
                 if !ok {
@@ -534,6 +576,18 @@ impl Drop for PluginInstance {
 /// Adapter used by the DSP graph.
 pub struct HostPluginAudio {
     pub inner: Arc<Mutex<PluginHost>>,
+    /// Bounce thread: block on the host lock and wait longer for the worker.
+    pub offline: bool,
+}
+
+impl HostPluginAudio {
+    fn lock_host(&self) -> Option<parking_lot::MutexGuard<'_, PluginHost>> {
+        if self.offline {
+            Some(self.inner.lock())
+        } else {
+            self.inner.try_lock()
+        }
+    }
 }
 
 impl PluginAudioHost for HostPluginAudio {
@@ -544,13 +598,13 @@ impl PluginAudioHost for HostPluginAudio {
         output: &mut AudioBuffer,
         ctx: &TransportBlockInfo,
     ) -> bool {
-        let Some(mut host) = self.inner.try_lock() else {
+        let Some(mut host) = self.lock_host() else {
             // Avoid blocking the realtime thread if the UI holds the host lock.
             output.clear();
             return false;
         };
         if let Some(inst) = host.instances.get_mut(&instance) {
-            inst.process_block(midi, None, output, ctx)
+            inst.process_block(midi, None, output, ctx, self.offline)
         } else {
             output.clear();
             false
@@ -564,12 +618,12 @@ impl PluginAudioHost for HostPluginAudio {
         output: &mut AudioBuffer,
         ctx: &TransportBlockInfo,
     ) -> bool {
-        let Some(mut host) = self.inner.try_lock() else {
+        let Some(mut host) = self.lock_host() else {
             *output = input.clone();
             return false;
         };
         if let Some(inst) = host.instances.get_mut(&instance) {
-            inst.process_block(&[], Some(input), output, ctx)
+            inst.process_block(&[], Some(input), output, ctx, self.offline)
         } else {
             *output = input.clone();
             false
@@ -577,7 +631,7 @@ impl PluginAudioHost for HostPluginAudio {
     }
 
     fn set_param(&mut self, instance: PluginInstanceId, param_id: u32, value: f32) {
-        let Some(mut host) = self.inner.try_lock() else {
+        let Some(mut host) = self.lock_host() else {
             return;
         };
         host.set_param_normalized(instance, param_id, value);

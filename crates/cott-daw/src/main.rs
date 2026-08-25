@@ -2,15 +2,9 @@
 
 mod app;
 mod audio;
-mod builtin_bass;
 mod builtin_filter;
-mod builtin_haze;
-mod builtin_kit;
-mod builtin_pluck;
 mod builtin_synth;
-mod builtin_tape;
 mod builtin_vinyl;
-mod builtin_whistle;
 mod plugins;
 mod ui;
 

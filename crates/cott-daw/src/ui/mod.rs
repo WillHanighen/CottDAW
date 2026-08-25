@@ -455,7 +455,7 @@ fn draw_browser(app: &mut CottApp, ui: &mut egui::Ui) {
         .on_hover_text("Filter VSTs");
     ui.weak("Click a plugin to load it, or right-click the routing canvas.");
     ui.weak(
-        "CottSynth, CottFilter, CottVinyl, CottWhistle, CottHaze, CottTape, CottBass, CottPluck, and CottKit are always listed (built-in VST3s).",
+        "CottSynth, CottFilter, and CottVinyl are always listed (built-in VST3s).",
     );
     if app.is_scanning_plugins() {
         ui.weak("Scanning… (filesystem only; Wine starts when you load a plugin)");
@@ -727,6 +727,26 @@ pub(crate) fn draw_builtin_synth_inspector(
         && ui
             .add(egui::Slider::new(&mut params.pulse_width, 0.05..=0.95).text("Pulse width"))
             .changed()
+    {
+        changed = true;
+    }
+    if matches!(params.waveform, cott_core::Waveform::Super) {
+        if ui
+            .add(egui::Slider::new(&mut params.super_detune, 0.0..=1.0).text("Detune"))
+            .changed()
+        {
+            changed = true;
+        }
+        if ui
+            .add(egui::Slider::new(&mut params.super_mix, 0.0..=1.0).text("Mix"))
+            .changed()
+        {
+            changed = true;
+        }
+    }
+    if ui
+        .add(egui::Slider::new(&mut params.delay, 0.0..=1.0).text("Delay"))
+        .changed()
     {
         changed = true;
     }

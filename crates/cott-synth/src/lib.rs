@@ -50,16 +50,20 @@ enum WaveParam {
     #[id = "noise"]
     #[name = "Noise"]
     Noise,
+    #[id = "super"]
+    #[name = "Super"]
+    Super,
 }
 
 impl WaveParam {
-    const ALL: [WaveParam; 6] = [
+    const ALL: [WaveParam; 7] = [
         WaveParam::Sine,
         WaveParam::Saw,
         WaveParam::Square,
         WaveParam::Triangle,
         WaveParam::Pulse,
         WaveParam::Noise,
+        WaveParam::Super,
     ];
 
     fn label(self) -> &'static str {
@@ -70,6 +74,7 @@ impl WaveParam {
             WaveParam::Triangle => "Triangle",
             WaveParam::Pulse => "Pulse",
             WaveParam::Noise => "Noise",
+            WaveParam::Super => "Super",
         }
     }
 
@@ -81,6 +86,7 @@ impl WaveParam {
             WaveParam::Triangle => Waveform::Triangle,
             WaveParam::Pulse => Waveform::Pulse,
             WaveParam::Noise => Waveform::Noise,
+            WaveParam::Super => Waveform::Super,
         }
     }
 }
@@ -108,6 +114,15 @@ struct CottSynthParams {
     #[id = "pwidth"]
     pulse_width: FloatParam,
 
+    #[id = "sdetune"]
+    super_detune: FloatParam,
+
+    #[id = "smix"]
+    super_mix: FloatParam,
+
+    #[id = "delay"]
+    delay: FloatParam,
+
     #[id = "gain"]
     gain: FloatParam,
 }
@@ -126,7 +141,7 @@ impl Default for CottSynth {
 impl Default for CottSynthParams {
     fn default() -> Self {
         Self {
-            editor_state: EguiState::from_size(620, 500),
+            editor_state: EguiState::from_size(660, 540),
             waveform: EnumParam::new("Waveform", WaveParam::Sine),
             attack_ms: FloatParam::new(
                 "Attack",
@@ -181,6 +196,25 @@ impl Default for CottSynthParams {
             .with_unit(" %")
             .with_value_to_string(formatters::v2s_f32_percentage(0))
             .with_string_to_value(formatters::s2v_f32_percentage()),
+            super_detune: FloatParam::new(
+                "Detune",
+                0.5,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_step_size(0.01)
+            .with_unit(" %")
+            .with_value_to_string(formatters::v2s_f32_percentage(0))
+            .with_string_to_value(formatters::s2v_f32_percentage()),
+            super_mix: FloatParam::new("Mix", 0.75, FloatRange::Linear { min: 0.0, max: 1.0 })
+                .with_step_size(0.01)
+                .with_unit(" %")
+                .with_value_to_string(formatters::v2s_f32_percentage(0))
+                .with_string_to_value(formatters::s2v_f32_percentage()),
+            delay: FloatParam::new("Delay", 0.0, FloatRange::Linear { min: 0.0, max: 1.0 })
+                .with_step_size(0.01)
+                .with_unit(" %")
+                .with_value_to_string(formatters::v2s_f32_percentage(0))
+                .with_string_to_value(formatters::s2v_f32_percentage()),
             gain: FloatParam::new("Gain", 0.25, FloatRange::Linear { min: 0.0, max: 1.0 })
                 .with_step_size(0.01)
                 .with_unit(" %")
@@ -231,7 +265,7 @@ impl Plugin for CottSynth {
                 // from an older build) might hand us — a larger minimum makes
                 // egui push the panel off the left edge of the window.
                 ResizableWindow::new("cott_synth_resize")
-                    .min_size(Vec2::new(380.0, 330.0))
+                    .min_size(Vec2::new(420.0, 360.0))
                     .show(egui_ctx, egui_state.as_ref(), |ui| {
                         draw_panel(ui, setter, &params, &scope);
                     });
@@ -307,6 +341,9 @@ impl Plugin for CottSynth {
                 release_ms: self.params.release_ms.value(),
             },
             pulse_width: self.params.pulse_width.value(),
+            super_detune: self.params.super_detune.value(),
+            super_mix: self.params.super_mix.value(),
+            delay: self.params.delay.value(),
             gain: self.params.gain.value(),
         };
 
@@ -344,7 +381,7 @@ fn draw_panel(
         scope.level(),
     );
 
-    let (osc_rect, rest) = layout::split_top(rest, rest.height() * 0.34, 10.0);
+    let (osc_rect, rest) = layout::split_top(rest, rest.height() * 0.40, 10.0);
     let (env_rect, out_rect) = layout::split_top(rest, rest.height() * 0.52, 10.0);
 
     draw_oscillator(ui, setter, params, osc_rect);
@@ -362,15 +399,15 @@ fn draw_oscillator(
     let inner = plate_legend(ui.painter(), inner, &SKIN, "Oscillator");
 
     let (buttons, tail) = layout::split_left(inner, inner.width() * 0.40, 10.0);
-    let (preview, pw_cell) = layout::split_left(tail, tail.width() * 0.62, 10.0);
+    let (preview, knobs) = layout::split_left(tail, tail.width() * 0.52, 10.0);
 
-    // Waveform selector: two columns of latching caps.
+    // Waveform selector: two columns of latching caps (7 waves, last cell empty).
     let current = params.waveform.value();
     let cols = layout::columns(buttons, 2, 6.0);
     for (col_idx, col) in cols.iter().enumerate() {
-        let cells = layout::rows(*col, 3, 5.0);
+        let cells = layout::rows(*col, 4, 4.0);
         for (row_idx, cell) in cells.iter().enumerate() {
-            let Some(wave) = WaveParam::ALL.get(col_idx * 3 + row_idx).copied() else {
+            let Some(wave) = WaveParam::ALL.get(col_idx * 4 + row_idx).copied() else {
                 continue;
             };
             let selected = wave == current;
@@ -388,9 +425,20 @@ fn draw_oscillator(
     let well = paint_well(ui.painter(), preview, &SKIN);
     let wave = current.to_waveform();
     let pulse_width = params.pulse_width.value();
+    let super_detune = params.super_detune.value();
+    let super_mix = params.super_mix.value();
     let mut noise = 0xC0FF_EE42u32;
+    let dt = 1.0 / 160.0;
     paint_curve(ui.painter(), well, &SKIN, 160, |t| {
-        let sample = cott_synth_dsp::sample_waveform(wave, t, pulse_width, &mut noise);
+        let sample = cott_synth_dsp::sample_waveform(
+            wave,
+            t,
+            dt,
+            pulse_width,
+            super_detune,
+            super_mix,
+            &mut noise,
+        );
         0.5 + sample * 0.42
     });
     ui.painter().text(
@@ -401,14 +449,33 @@ fn draw_oscillator(
         cott_plugin_ui::with_alpha(SKIN.legend_dim, 180),
     );
 
+    let knob_rows = layout::rows(knobs, 3, 4.0);
     param_knob_enabled(
         ui,
-        pw_cell,
+        knob_rows[0],
         &SKIN,
         setter,
         &params.pulse_width,
         "Width",
         matches!(wave, Waveform::Pulse),
+    );
+    param_knob_enabled(
+        ui,
+        knob_rows[1],
+        &SKIN,
+        setter,
+        &params.super_detune,
+        "Detune",
+        matches!(wave, Waveform::Super),
+    );
+    param_knob_enabled(
+        ui,
+        knob_rows[2],
+        &SKIN,
+        setter,
+        &params.super_mix,
+        "Mix",
+        matches!(wave, Waveform::Super),
     );
 }
 
@@ -449,9 +516,11 @@ fn draw_output(
 ) {
     let inner = paint_plate(ui.painter(), rect, &SKIN);
     let inner = plate_legend(ui.painter(), inner, &SKIN, "Output");
-    let (gain_cell, trace) = layout::split_left(inner, 78.0f32.min(inner.width() * 0.3), 10.0);
+    let (knobs, trace) = layout::split_left(inner, 156.0f32.min(inner.width() * 0.42), 10.0);
+    let cells = layout::columns(knobs, 2, 6.0);
 
-    param_knob(ui, gain_cell, &SKIN, setter, &params.gain, "Gain");
+    param_knob(ui, cells[0], &SKIN, setter, &params.gain, "Gain");
+    param_knob(ui, cells[1], &SKIN, setter, &params.delay, "Delay");
 
     let well = paint_well(ui.painter(), trace, &SKIN);
     let mut samples = [0.0f32; SCOPE_LEN];

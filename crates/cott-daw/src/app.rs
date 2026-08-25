@@ -24,6 +24,7 @@ use indexmap::IndexMap;
 use parking_lot::Mutex;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
@@ -1353,16 +1354,35 @@ impl CottApp {
         // to the size plugins were set up with.
         opts.block_size = self.audio.as_ref().map(|a| a.buffer_size).unwrap_or(256);
 
+        if let Some(audio) = &mut self.audio {
+            audio.exporting.store(true, Ordering::Release);
+            if self.project.transport == TransportState::Playing {
+                self.project.transport = TransportState::Paused;
+                let _ = audio
+                    .cmd_tx
+                    .push(EngineCommand::SetTransport(TransportState::Paused));
+                audio.shared.set_state(TransportState::Paused);
+            }
+        }
+
         let project = self.project.clone();
         let sample_cache = Arc::clone(&self.sample_cache);
         let plugin_host = Arc::clone(&self.plugin_host);
+        let exporting = self.audio.as_ref().map(|a| Arc::clone(&a.exporting));
         let (tx, rx) = mpsc::channel();
         self.export_rx = Some(rx);
         self.status = format!("Exporting {}…", path.display());
         std::thread::Builder::new()
             .name("cott-export".into())
             .spawn(move || {
-                let mut live = crate::plugins::HostPluginAudio { inner: plugin_host };
+                let _unmute = ExportMuteGuard(exporting);
+                // Wait out an in-flight realtime process() before we own the workers.
+                drop(plugin_host.lock());
+                plugin_host.lock().reset_all();
+                let mut live = crate::plugins::HostPluginAudio {
+                    inner: Arc::clone(&plugin_host),
+                    offline: true,
+                };
                 let result = match opts.format {
                     ExportFormat::Wav => {
                         let buf = cott_core::export::render_project_stereo(
@@ -1382,6 +1402,7 @@ impl CottApp {
                     }
                 }
                 .map_err(|e| format!("{e:#}"));
+                plugin_host.lock().reset_all();
                 let _ = tx.send(result);
             })
             .expect("spawn export thread");
@@ -1741,6 +1762,16 @@ impl CottApp {
             },
         );
         self.sync_engine();
+    }
+}
+
+struct ExportMuteGuard(Option<Arc<AtomicBool>>);
+
+impl Drop for ExportMuteGuard {
+    fn drop(&mut self) {
+        if let Some(flag) = &self.0 {
+            flag.store(false, Ordering::Release);
+        }
     }
 }
 

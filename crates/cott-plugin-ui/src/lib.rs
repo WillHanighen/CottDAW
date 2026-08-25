@@ -2,8 +2,7 @@
 //!
 //! Every first-party plugin paints the same chassis — brushed deck, raised
 //! plates, recessed wells, machined dials — and differs only by its accent
-//! jewel ([`Skin::amber`], [`Skin::teal`], [`Skin::steel`], [`Skin::dusk`],
-//! [`Skin::grain`], [`Skin::rust`], [`Skin::ink`]).
+//! jewel ([`Skin::teal`], [`Skin::steel`], [`Skin::grain`]).
 //!
 //! Panels are laid out with explicit rects (see [`layout`]) instead of egui
 //! layouts, so the hardware alignment survives resizing.
@@ -12,7 +11,6 @@ pub mod button;
 pub mod chassis;
 pub mod knob;
 pub mod layout;
-pub mod paddle;
 pub mod scale;
 pub mod scope;
 pub mod skin;
@@ -24,7 +22,6 @@ pub use chassis::{
     readout, spaced, with_alpha,
 };
 pub use knob::{display_knob, paint_knob, param_knob, param_knob_enabled};
-pub use paddle::{paddle, PaddleThrow};
 pub use scale::{display_scale, physical_size};
 pub use scope::{
     paint_curve, paint_curve_filled, paint_envelope, paint_grid, paint_marker, paint_waveform,
