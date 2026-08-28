@@ -9,7 +9,7 @@ Arrangement timeline, piano-roll MIDI editing, an authoritative acyclic audio/MI
 - Arrangement timeline with MIDI and audio tracks
 - Piano-roll MIDI editing with note audition
 - Authoritative acyclic audio/MIDI routing graph (cycles rejected)
-- Built-in **CottSynth**, **CottFilter**, and **CottVinyl** VST3s (always in the browser; synth default on MIDI tracks)
+- Built-in **CottSynth**, **CottDrums**, **CottBass**, **CottKeys**, **CottFilter**, and **CottVinyl** VST3s (always in the browser; synth default on MIDI tracks)
 - Built-in gain/pan/mute, summing, and master bus
 - Sandboxed VST2, VST3, CLAP, and LV2 hosting (one worker process per plugin)
 - yabridge support for Windows VST2, VST3, and CLAP plugins
@@ -17,7 +17,7 @@ Arrangement timeline, piano-roll MIDI editing, an authoritative acyclic audio/MI
 - Undo / redo
 - Project `.ctgdaw` save/load with periodic autosave
 - Offline export to WAV, Ogg Opus, or Gonio MP4 (via `ffmpeg`)
-- Redistributable first-party VST3s (`cargo bundle-synth`, `cargo bundle-filter`, `cargo bundle-vinyl`)
+- Redistributable first-party VST3s (`cargo bundle-synth`, `cargo bundle-drums`, `cargo bundle-bass`, `cargo bundle-keys`, `cargo bundle-filter`, `cargo bundle-vinyl`)
 
 ## Documentation
 
@@ -49,7 +49,9 @@ For Windows plugins, install Wine Staging and yabridge, register the Windows plu
 
 ```bash
 ./scripts/build-daw.sh
-# or: cargo bundle-synth-debug && cargo bundle-filter-debug && cargo bundle-vinyl-debug && cargo build -p cott-daw -p cott-vst-worker
+# or: cargo bundle-synth-debug && cargo bundle-filter-debug && cargo bundle-vinyl-debug \
+#     && cargo bundle-drums-debug && cargo bundle-bass-debug && cargo bundle-keys-debug \
+#     && cargo build -p cott-daw -p cott-vst-worker
 ```
 
 Both binaries land in `target/debug/`. The DAW looks for `cott-vst-worker` next to itself (or under `target/debug|release/`). Bundle the first-party VSTs so they show up in the browser.
@@ -60,10 +62,17 @@ Both binaries land in `target/debug/`. The DAW looks for `cott-vst-worker` next 
 cargo bundle-synth          # → target/bundled/cott-synth.vst3
 cargo bundle-filter         # → target/bundled/cott-filter.vst3
 cargo bundle-vinyl          # → target/bundled/cott-vinyl.vst3
+cargo bundle-drums          # → target/bundled/cott-drums.vst3
+cargo bundle-bass           # → target/bundled/cott-bass.vst3
+cargo bundle-keys           # → target/bundled/cott-keys.vst3
 # debug: add -debug to any of those aliases
 ```
 
-Copy those bundles into `~/.vst3/` (or another host's VST3 path) to use them outside CottDAW. The DAW injects them into the plugin browser automatically (CottSynth = default MIDI instrument; CottFilter = stereo LP/HP; CottVinyl = record wear).
+Copy those bundles into `~/.vst3/` (or another host's VST3 path) to use them outside CottDAW. The DAW injects them into the plugin browser automatically (CottSynth = default MIDI instrument; CottDrums = analog pad kit; CottBass = mono sub; CottKeys = keys/bells/pluck; CottFilter = stereo LP/HP; CottVinyl = record wear).
+
+### CottDrums / CottBass / CottKeys
+
+Instruments. CottDrums is an analog pad kit (kick, snare, clap, hats, rim, tom) with a Kit knob that leans from electronic toward a bedroom kit. CottBass is a one-note sub with punch, slide, and growl. CottKeys is a chord box: Keys, Bells, or Pluck, plus warmth and chorus. They stay clean. Put CottVinyl after them if you want dirt.
 
 ### CottVinyl
 
@@ -99,6 +108,9 @@ cott-vst-worker  (one process per plugin instance)
 
 - **`cott-core`** — project model, typed DAG, DSP graph compiler, offline render (includes built-in CottSynth)
 - **`cott-synth-dsp` / `cott-synth`** — shared synth engine + redistributable VST3
+- **`cott-drums-dsp` / `cott-drums`** — analog pad drum machine
+- **`cott-bass-dsp` / `cott-bass`** — mono sub
+- **`cott-keys-dsp` / `cott-keys`** — keys / bells / pluck
 - **`cott-filter-dsp` / `cott-filter`** — stereo LP/HP biquad + redistributable VST3
 - **`cott-vinyl-dsp` / `cott-vinyl`** — CottVinyl VST3 (pops, hiss, muffle, rumble)
 - **`cott-plugin-ui`** — shared skeuomorphic panel kit used by the first-party plugin editors
@@ -113,6 +125,11 @@ cargo build -p cott-daw -p cott-vst-worker
 
 # CottVinyl: wear + VST3 wrapper
 cargo test -p cott-vinyl-dsp -p cott-vinyl
+
+# CottDrums / CottBass / CottKeys
+cargo test -p cott-drums-dsp -p cott-drums
+cargo test -p cott-bass-dsp -p cott-bass
+cargo test -p cott-keys-dsp -p cott-keys
 ```
 
 ## Limitations

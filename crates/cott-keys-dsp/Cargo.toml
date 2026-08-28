@@ -1,0 +1,9 @@
+[package]
+name = "cott-keys-dsp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Electric piano / bells / pluck DSP for CottKeys"
+
+[dependencies]
+serde = { workspace = true }

@@ -9,3 +9,12 @@ bundle-filter-debug = "run -p cott-xtask -- bundle cott-filter"
 # CottVinyl (stereo vinyl wear effect).
 bundle-vinyl = "run -p cott-xtask --release -- bundle cott-vinyl --release"
 bundle-vinyl-debug = "run -p cott-xtask -- bundle cott-vinyl"
+# CottDrums (analog pad drum machine).
+bundle-drums = "run -p cott-xtask --release -- bundle cott-drums --release"
+bundle-drums-debug = "run -p cott-xtask -- bundle cott-drums"
+# CottBass (mono sub).
+bundle-bass = "run -p cott-xtask --release -- bundle cott-bass --release"
+bundle-bass-debug = "run -p cott-xtask -- bundle cott-bass"
+# CottKeys (keys / bells / pluck).
+bundle-keys = "run -p cott-xtask --release -- bundle cott-keys --release"
+bundle-keys-debug = "run -p cott-xtask -- bundle cott-keys"

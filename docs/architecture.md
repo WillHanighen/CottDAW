@@ -21,7 +21,13 @@ crates/
   cott-filter/        Redistributable CottFilter VST3
   cott-vinyl-dsp/     CottVinyl pops / hiss / muffle / rumble
   cott-vinyl/         Redistributable CottVinyl VST3
-  cott-xtask/         `cargo bundle-synth` bundler
+  cott-drums-dsp/     CottDrums analog pad kit
+  cott-drums/         Redistributable CottDrums VST3
+  cott-bass-dsp/      CottBass mono sub
+  cott-bass/          Redistributable CottBass VST3
+  cott-keys-dsp/      CottKeys keys / bells / pluck
+  cott-keys/          Redistributable CottKeys VST3
+  cott-xtask/         `cargo bundle-*` bundler
 vendor/
   truce-rack-vst3/    Patched VST3 bindings (ModuleEntry before GetPluginFactory)
 ```
@@ -38,6 +44,12 @@ vendor/
 | `cott-filter` | CottFilter VST3 `cdylib` |
 | `cott-vinyl-dsp` | Stereo vinyl wear: pops, hiss, rumble, Dusty / Radio / Tape |
 | `cott-vinyl` | CottVinyl VST3 `cdylib` |
+| `cott-drums-dsp` | Analog pad drum machine |
+| `cott-drums` | CottDrums VST3 `cdylib` |
+| `cott-bass-dsp` | Mono sine sub with punch / slide / growl |
+| `cott-bass` | CottBass VST3 `cdylib` |
+| `cott-keys-dsp` | FM keys, bells, pluck + chorus |
+| `cott-keys` | CottKeys VST3 `cdylib` |
 
 Workspace root patches `truce-rack-vst3` so Linux/yabridge chainloaders call `ModuleEntry` before `GetPluginFactory`.
 

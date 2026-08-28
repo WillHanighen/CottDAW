@@ -1,0 +1,9 @@
+[package]
+name = "cott-drums-dsp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Analog pad drum machine DSP for CottDrums"
+
+[dependencies]
+serde = { workspace = true }

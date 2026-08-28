@@ -1,0 +1,9 @@
+[package]
+name = "cott-bass-dsp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Monophonic sub bass DSP for CottBass"
+
+[dependencies]
+serde = { workspace = true }

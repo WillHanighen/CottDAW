@@ -888,6 +888,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "cott-bass"
+version = "0.1.0"
+dependencies = [
+ "cott-bass-dsp",
+ "cott-plugin-ui",
+ "nih_plug",
+ "nih_plug_egui",
+]
+
+[[package]]
+name = "cott-bass-dsp"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "cott-core"
 version = "0.1.0"
 dependencies = [
@@ -944,6 +961,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "cott-drums"
+version = "0.1.0"
+dependencies = [
+ "cott-drums-dsp",
+ "cott-plugin-ui",
+ "nih_plug",
+ "nih_plug_egui",
+]
+
+[[package]]
+name = "cott-drums-dsp"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "cott-filter"
 version = "0.1.0"
 dependencies = [
@@ -973,6 +1007,23 @@ dependencies = [
  "thiserror 2.0.18",
  "tracing",
  "uuid 1.23.5",
+]
+
+[[package]]
+name = "cott-keys"
+version = "0.1.0"
+dependencies = [
+ "cott-keys-dsp",
+ "cott-plugin-ui",
+ "nih_plug",
+ "nih_plug_egui",
+]
+
+[[package]]
+name = "cott-keys-dsp"
+version = "0.1.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
