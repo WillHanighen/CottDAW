@@ -56,6 +56,9 @@ impl PluginHost {
         crate::builtin_synth::inject_cott_synth(&mut catalog);
         crate::builtin_filter::inject_cott_filter(&mut catalog);
         crate::builtin_vinyl::inject_cott_vinyl(&mut catalog);
+        crate::builtin_drums::inject_cott_drums(&mut catalog);
+        crate::builtin_bass::inject_cott_bass(&mut catalog);
+        crate::builtin_keys::inject_cott_keys(&mut catalog);
         Self {
             catalog,
             instances: IndexMap::new(),
@@ -69,6 +72,9 @@ impl PluginHost {
         crate::builtin_synth::inject_cott_synth(&mut catalog);
         crate::builtin_filter::inject_cott_filter(&mut catalog);
         crate::builtin_vinyl::inject_cott_vinyl(&mut catalog);
+        crate::builtin_drums::inject_cott_drums(&mut catalog);
+        crate::builtin_bass::inject_cott_bass(&mut catalog);
+        crate::builtin_keys::inject_cott_keys(&mut catalog);
         self.catalog = catalog;
     }
 

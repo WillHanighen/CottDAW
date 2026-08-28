@@ -80,6 +80,33 @@ impl Skin {
             Color32::from_rgb(255, 224, 160),
         )
     }
+
+    /// CottDrums — terracotta.
+    pub const fn rust() -> Self {
+        Self::chassis(
+            Color32::from_rgb(232, 124, 88),
+            Color32::from_rgb(110, 48, 32),
+            Color32::from_rgb(255, 196, 168),
+        )
+    }
+
+    /// CottBass — deep indigo.
+    pub const fn ink() -> Self {
+        Self::chassis(
+            Color32::from_rgb(140, 132, 236),
+            Color32::from_rgb(52, 46, 120),
+            Color32::from_rgb(196, 192, 255),
+        )
+    }
+
+    /// CottKeys — lilac.
+    pub const fn lilac() -> Self {
+        Self::chassis(
+            Color32::from_rgb(214, 168, 214),
+            Color32::from_rgb(96, 58, 104),
+            Color32::from_rgb(246, 214, 246),
+        )
+    }
 }
 
 /// Neutral egui visuals so stray built-in widgets do not flash white.

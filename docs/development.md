@@ -24,6 +24,12 @@ crates/cott-filter-dsp/    # CottFilter biquad DSP + response probe
 crates/cott-filter/        # CottFilter VST3 cdylib
 crates/cott-vinyl-dsp/     # CottVinyl wear (pops, hiss, muffle, rumble)
 crates/cott-vinyl/         # CottVinyl VST3 cdylib
+crates/cott-drums-dsp/     # CottDrums analog pad kit
+crates/cott-drums/         # CottDrums VST3 cdylib
+crates/cott-bass-dsp/      # CottBass mono sub
+crates/cott-bass/          # CottBass VST3 cdylib
+crates/cott-keys-dsp/      # CottKeys keys / bells / pluck
+crates/cott-keys/          # CottKeys VST3 cdylib
 crates/cott-plugin-ui/     # shared skeuomorphic egui panel kit for the VST3s
 crates/cott-xtask/         # nih-plug bundler entry
 vendor/truce-rack-vst3/    # patched VST3 host bindings
@@ -35,14 +41,16 @@ Default member is `cott-daw`.
 ## Build
 
 ```bash
-# Typical (script): bundle CottSynth, then host + worker
+# Typical (script): bundle first-party VSTs, then host + worker
 ./scripts/build-daw.sh
 ./scripts/build-daw.sh release
 
 # Or manually (one alias per first-party plugin):
 cargo bundle-synth-debug && cargo bundle-filter-debug && cargo bundle-vinyl-debug \
+  && cargo bundle-drums-debug && cargo bundle-bass-debug && cargo bundle-keys-debug \
   && cargo build -p cott-daw -p cott-vst-worker
 cargo bundle-synth && cargo bundle-filter && cargo bundle-vinyl \
+  && cargo bundle-drums && cargo bundle-bass && cargo bundle-keys \
   && cargo build --release -p cott-daw -p cott-vst-worker
 ```
 
@@ -51,7 +59,7 @@ The DAW always lists the first-party VST3s in the browser and loads the bundles 
 Install the same bundles for other hosts with:
 
 ```bash
-cp -a target/bundled/cott-{synth,filter,vinyl}.vst3 ~/.vst3/
+cp -a target/bundled/cott-{synth,filter,vinyl,drums,bass,keys}.vst3 ~/.vst3/
 ```
 
 The host resolves the worker binary as:
@@ -82,6 +90,11 @@ cargo build -p cott-daw -p cott-vst-worker
 # CottVinyl: wear + VST3 panel
 cargo test -p cott-vinyl-dsp -p cott-vinyl
 cargo check -p cott-vinyl && cargo bundle-vinyl-debug
+
+# CottDrums / CottBass / CottKeys
+cargo test -p cott-drums-dsp -p cott-drums
+cargo test -p cott-bass-dsp -p cott-bass
+cargo test -p cott-keys-dsp -p cott-keys
 ```
 
 To open an editor standalone, point the worker at the **bundle directory** (not the inner `.so`, which the scanner cannot resolve):
@@ -107,6 +120,9 @@ Useful `cott-core` areas covered by unit tests include tempo/sample conversion, 
 | CottFilter biquad + response curve | `cott-filter-dsp` |
 | CottVinyl pops / hiss / rumble / Dusty-Radio-Tape wear | `cott-vinyl-dsp` |
 | CottVinyl VST3 wrapper | `cott-vinyl` |
+| CottDrums analog pads | `cott-drums-dsp` |
+| CottBass mono sub | `cott-bass-dsp` |
+| CottKeys keys / bells / pluck | `cott-keys-dsp` |
 | Plugin panel look (chassis, knobs, wells) | `cott-plugin-ui` |
 | First-party plugin catalog entries | `cott-daw/src/builtin_*.rs` |
 | Engine commands & offline render | `cott-core/src/engine.rs` |

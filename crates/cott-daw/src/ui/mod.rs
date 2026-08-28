@@ -455,7 +455,7 @@ fn draw_browser(app: &mut CottApp, ui: &mut egui::Ui) {
         .on_hover_text("Filter VSTs");
     ui.weak("Click a plugin to load it, or right-click the routing canvas.");
     ui.weak(
-        "CottSynth, CottFilter, and CottVinyl are always listed (built-in VST3s).",
+        "Cottage instruments and effects stay listed even with an empty scan.",
     );
     if app.is_scanning_plugins() {
         ui.weak("Scanning… (filesystem only; Wine starts when you load a plugin)");

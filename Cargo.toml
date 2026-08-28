@@ -11,6 +11,12 @@ members = [
     "crates/cott-filter",
     "crates/cott-vinyl-dsp",
     "crates/cott-vinyl",
+    "crates/cott-drums-dsp",
+    "crates/cott-drums",
+    "crates/cott-bass-dsp",
+    "crates/cott-bass",
+    "crates/cott-keys-dsp",
+    "crates/cott-keys",
     "crates/cott-plugin-ui",
     "crates/cott-xtask",
 ]
@@ -28,6 +34,9 @@ cott-ipc = { path = "crates/cott-ipc" }
 cott-synth-dsp = { path = "crates/cott-synth-dsp" }
 cott-filter-dsp = { path = "crates/cott-filter-dsp" }
 cott-vinyl-dsp = { path = "crates/cott-vinyl-dsp" }
+cott-drums-dsp = { path = "crates/cott-drums-dsp" }
+cott-bass-dsp = { path = "crates/cott-bass-dsp" }
+cott-keys-dsp = { path = "crates/cott-keys-dsp" }
 cott-plugin-ui = { path = "crates/cott-plugin-ui" }
 
 # Pinned in one place so every first-party plugin links the same egui/nih-plug.

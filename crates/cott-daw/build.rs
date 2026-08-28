@@ -25,6 +25,9 @@ fn main() {
             "bundle-filter",
         ),
         ("cott-vinyl", "COTT_VINYL_VST3", "CottVinyl", "bundle-vinyl"),
+        ("cott-drums", "COTT_DRUMS_VST3", "CottDrums", "bundle-drums"),
+        ("cott-bass", "COTT_BASS_VST3", "CottBass", "bundle-bass"),
+        ("cott-keys", "COTT_KEYS_VST3", "CottKeys", "bundle-keys"),
     ] {
         println!("cargo:rerun-if-changed=../{stem}/src");
         println!("cargo:rerun-if-changed=../{stem}/Cargo.toml");

@@ -33,7 +33,7 @@ Default signal paths:
 - **MIDI:** clip source → **CottSynth** (built-in VST3) → gain/pan → master
 - **Audio:** clip source → gain/pan → master
 
-**CottSynth** always appears at the top of the plugin browser (even with an empty scan), along with CottFilter and CottVinyl. They load through the normal sandboxed VST3 worker and have their own editor windows — open one from the **Plugins** tab (**Open Native Editor**) or the routing context menu. CottSynth waveforms: sine / saw / square / triangle / pulse / noise / super, plus ADSR. Super has Detune and Mix knobs (JP-8000-style seven-saw). Delay is a wet-mix echo (375 ms). CottVinyl is the record-wear effect. Loading another instrument from the browser replaces the current one.
+**CottSynth** always appears at the top of the plugin browser (even with an empty scan), along with CottDrums, CottBass, CottKeys, CottFilter, and CottVinyl. They load through the normal sandboxed VST3 worker and have their own editor windows — open one from the **Plugins** tab (**Open Native Editor**) or the routing context menu. CottSynth waveforms: sine / saw / square / triangle / pulse / noise / super, plus ADSR. Super has Detune and Mix knobs (JP-8000-style seven-saw). Delay is a wet-mix echo (375 ms). CottDrums is the analog pad kit (Kit knob leans bedroom). CottBass is the one-note sub. CottKeys is Keys / Bells / Pluck. CottVinyl is the record-wear effect. Loading another instrument from the browser replaces the current one.
 
 ### Arrangement
 

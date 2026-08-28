@@ -2,7 +2,8 @@
 //!
 //! Every first-party plugin paints the same chassis — brushed deck, raised
 //! plates, recessed wells, machined dials — and differs only by its accent
-//! jewel ([`Skin::teal`], [`Skin::steel`], [`Skin::grain`]).
+//! jewel ([`Skin::teal`], [`Skin::steel`], [`Skin::grain`], [`Skin::rust`],
+//! [`Skin::ink`], [`Skin::lilac`]).
 //!
 //! Panels are laid out with explicit rects (see [`layout`]) instead of egui
 //! layouts, so the hardware alignment survives resizing.

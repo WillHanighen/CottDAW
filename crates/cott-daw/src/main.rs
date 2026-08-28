@@ -5,6 +5,9 @@ mod audio;
 mod builtin_filter;
 mod builtin_synth;
 mod builtin_vinyl;
+mod builtin_drums;
+mod builtin_bass;
+mod builtin_keys;
 mod plugins;
 mod ui;
 
